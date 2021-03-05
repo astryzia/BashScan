@@ -6,4 +6,4 @@ Uses both ping and arping (if available) to sweep the network for live hosts, ge
 
 This backgrounds each task, so be mindful of system hardware when checking a large number of ports.
 
-The only thing you will need to change is the "net" variable to match your target network. Only supports /24 CIDR but easy to add more coverage if desired.
+Only supports /24 CIDR but easy to add more coverage if desired.
