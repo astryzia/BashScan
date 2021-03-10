@@ -55,6 +55,8 @@ if test $(which curl); then
 	getip=`curl -s icanhazip.com`
 elif test $(which wget); then
 	getip=`wget -O- -q icanhazip.com`
+elif test $(which dig); then
+	getip=`dig +short myip.opendns.com @resolver1.opendns.com`
 fi
 
 echo -e "\nLocal IP:\t\t$localip"
