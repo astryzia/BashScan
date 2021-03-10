@@ -57,12 +57,10 @@ elif test $(which wget); then
 	getip=`wget -O- -q icanhazip.com`
 fi
 
-
 echo -e "\nLocal IP:\t\t$localip"
 echo -e "Netmask:\t\t$iprange"
 echo -e "External IP:\t\t$getip"
 echo -e "Default Interface:\t$default_interface"
-
 
 pingsweep(){
 for ip in {1..254}; do
@@ -76,8 +74,9 @@ done;
 }
 
 portscan(){
+ports=(21 22 25 53 80 110 111 135 139 143 443 445 161 162 554 631 993 995 1030 1032 1033 1038 1433 1521 1723 2049 2100 3306 3339 3389 5432 5900 6379 8080 8443 9050)
 for host in $(cat /tmp/livehosts.txt);
-do for port in {20,21,22,80,135,139,443,445,554,3306,3389,8080,8443};
+do for port in ${ports[@]};
 	do (echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open" &
         done;
 done;
@@ -87,7 +86,12 @@ if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
 	echo -ne "\n[-] ARP ping disabled as root may be required, --help for more information"
 fi
 
-echo -ne "\n[+] Sweeping for live hosts (ICMP + ARP)\n"
+if test ! $(which arping); then
+	echo -ne "\n[+] Sweeping for live hosts (ICMP)\n"
+elif test $(which arping); then
+	echo -ne "\n[+] Sweeping for live hosts (ICMP + ARP)\n"
+fi
+
 pingsweep | sort -V | uniq > /tmp/livehosts.txt
 count=`cat /tmp/livehosts.txt | wc -l`
 
