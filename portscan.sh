@@ -1,41 +1,44 @@
 #!/bin/bash
-#---help---
-# Usage: PROGNAME [options]
-#
-# No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
-#
-# Options:
-#   -r --root           Force ARP ping to run even if user doesn't have root privileges.
-#
-#   -h --help           Show this help message and exit.
-#
-#   -v --version        Print version and exit.
-#
-#---help---
 
 readonly PROGNAME='portscan.sh'
 readonly VERSION='0.0.1'
 
-help() {
-	sed -En '/^#---help---/,/^#---help---/p' "$0" | sed -E "s/PROGNAME/$PROGNAME/" | sed -E 's/^# ?//; 1d;$d;'
-	exit ${1:-0}
+usage() {
+	echo "Usage: " $PROGNAME " [ -r | --root ]          Force ARP ping to run even if user doesn't have root privileges.
+	             [ -p | --ports PORTS ]   Replace default TCP port list with custom range.
+	             [ -h | --help ]          Show this help message and exit.
+	             [ -v | --version ]       Print version and exit. "
+	exit 0
 }
 
-opts=$(getopt -n $PROGNAME -o rhv \
-	-l root,help,version \
-	-- "$@") || help 1 >&2
 
-eval set -- "$opts"
+PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
+	-a \
+	-o p:rhv \
+	-l ports:,root,help,version \
+	-- "$@")
+VALID_ARGUMENTS=$?
+
+if [ "$VALID_ARGUMENTS" != "0" ]; then
+  usage
+fi
+
+eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
-	n=2
 	case "$1" in
-		-r | --root) ROOT_CHECK=false;;
-		-h | --help) help 0;;
-		-v | --version) echo "$PROGNAME $VERSION"; exit 0;;
+		-p | --ports) ports="$2"                            ; shift 2 ;;
+		-r | --root) ROOT_CHECK=false                       ; shift   ;; 
+		-h | --help) usage                                  ; exit 0  ;;
+		-v | --version) echo "$PROGNAME $VERSION"           ; exit 0  ;;
 		--) shift; break;;
+    	# If invalid options were passed, then getopt should have reported an error,
+    	# which we checked as VALID_ARGUMENTS when getopt was called...
+    	*) echo "Unexpected option: $1 - this should not happen."
+		usage ;;
 	esac
-	shift $n
 done
+
+echo $ports
 
 # Default values for the script options
 : ${ROOT_CHECK:=true}
@@ -55,8 +58,6 @@ if test $(which curl); then
 	getip=`curl -s icanhazip.com`
 elif test $(which wget); then
 	getip=`wget -O- -q icanhazip.com`
-elif test $(which dig); then
-	getip=`dig +short myip.opendns.com @resolver1.opendns.com`
 fi
 
 echo -e "\nLocal IP:\t\t$localip"
@@ -75,8 +76,22 @@ for ip in {1..254}; do
 done;
 }
 
+
 portscan(){
-ports=(21 22 25 53 80 110 111 135 139 143 443 445 161 162 554 631 993 995 1030 1032 1033 1038 1433 1521 1723 2049 2100 3306 3339 3389 5432 5900 6379 8080 8443 9050)
+if [[ -z "$ports" ]]; then
+	ports=(21 22 25 53 80 110 111 135 139 143 443 445 161 162 554 631 993 995 1030 1032 1033 1038 1433 1521 1723 2049 2100 3306 3339 3389 5432 5900 6379 8080 8443 9050)
+elif [[ ! -z $(grep -i , <<< $ports) ]]; then # is this a comman-separated list of ports? 
+	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
+elif [[ ! -z $(grep -i - <<< $ports) ]]; then # is this a range of ports?
+	IFS='-' read start end <<< $ports
+	ports=()
+	i=$start
+	while [ $i -le $end ]; do
+		ports+=($i)
+		let i=i+1
+	done
+fi
+
 for host in $(cat /tmp/livehosts.txt);
 do for port in ${ports[@]};
 	do (echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open" &
