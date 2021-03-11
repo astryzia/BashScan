@@ -38,8 +38,6 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-echo $ports
-
 # Default values for the script options
 : ${ROOT_CHECK:=true}
 
