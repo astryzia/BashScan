@@ -41,21 +41,43 @@ done
 # Default values for the script options
 : ${ROOT_CHECK:=true}
 
-if test ! $(which hostname); then
-        localip=`ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1'`
+# extract default network interface name from /proc
+#default_interface=$(cat /proc/net/dev | grep -v lo | cut -d$'\n' -f3 | cut -d":" -f1)
+
+# extract default network interface from route
+default_interface=`route | grep '^default' | grep -o '[^ ]*$'`
+
+if test $(which ip); then
+	localaddr=`ip -o -4 addr show $default_interface | tr -s " " | cut -d" " -f4`
+	IFS=/ read localip netCIDR <<< $localaddr
+elif test $(which ifconfig); then
+    localaddr=`ifconfig $default_interface | grep -Eo '(addr:)?([0-9]*\.){3}[0-9]*'`
+    localip=$(cut -d$'\n' -f1 <<< $localaddr)
+    netmask=$(cut -d$'\n' -f2 <<< $localaddr)
+    # ifconfig doesn't output CIDR, but we can calculate it from the netmask bits
+    c=0 x=0$( printf '%o' ${netmask//./ } )
+    while [ $x -gt 0 ]; do
+      	let c+=$((x%2)) 'x>>=1'
+    done
+    netCIDR=$c
 else
         localip=`hostname -I | cut -d" " -f1`
+        # FIXME: in an edge case where neither ifconfig nor iproute2 utils are available
+        #        need to get CIDR some other way
 fi
 
-netCIDR=`ip -o -f inet addr show | awk '/scope global/ {print $2, $4}' | cut -d"/" -f2 | head -1`
+## FIXME: these values for network and iprange are only valid for /24 CIDRs.
+#         need to update the method if/when custom CIDRs are allowed
 network=`echo $localip | cut -d"." -f1,2,3`
 iprange=`echo $network".0/"$netCIDR`
-default_interface=`route | grep '^default' | grep -o '[^ ]*$'`
+
 
 if test $(which curl); then
 	getip=`curl -s icanhazip.com`
 elif test $(which wget); then
 	getip=`wget -O- -q icanhazip.com`
+elif test $(which dig); then
+	getip=`dig +short myip.opendns.com @resolver1.opendns.com`
 fi
 
 echo -e "\nLocal IP:\t\t$localip"
