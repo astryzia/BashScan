@@ -4,16 +4,16 @@ readonly PROGNAME='portscan.sh'
 readonly VERSION='0.0.1'
 
 usage() {
+	clear
 	echo "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
 Usage: " $PROGNAME " 
 	             [ -h | --help ]          Show this help message and exit.
-	             [ -p | --ports PORTS ]   Replace default TCP port list with custom range.
+	             [ -p | --ports PORTS ]   Comma-separated list or range of integers.
 	             [ -r | --root ]          Force ARP ping to run even if user doesn't have root privileges.
 	             [ -t | --top-ports ]     Specify number of top TCP ports to scan (default = 20 )
 	             [ -v | --version ]       Print version and exit. "
 	exit 0
 }
-
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
@@ -46,12 +46,20 @@ done
 : ${ROOT_CHECK:=true}
 : ${TOP_PORTS:=20}
 
-# extract default network interface name from /proc
-#default_interface=$(cat /proc/net/dev | grep -v lo | cut -d$'\n' -f3 | cut -d":" -f1)
 
-# extract default network interface from route
-default_interface=`route | grep '^default' | grep -o '[^ ]*$'`
+# determine default network interface
+if test $(which ip); then
+	#FIXME: confirm that `ip route` field output is consistent across systems or use a different method
+	default_interface=`ip route | grep '^default' | cut -d" " -f5` 
+elif test $(which route); then
+	#Output of `route` should consistently show interface name as last field
+	default_interface=`route | grep '^default' | grep -o '[^ ]*$'`
+else 
+	# fallback to reading interface name from /proc
+	default_interface=`cat /proc/net/dev | grep -v lo | cut -d$'\n' -f3 | cut -d":" -f1`
+fi
 
+# determine local IP and CIDR for default interface
 if test $(which ip); then
 	localaddr=`ip -o -4 addr show $default_interface | tr -s " " | cut -d" " -f4`
 	IFS=/ read localip netCIDR <<< $localaddr
@@ -77,12 +85,28 @@ network=`echo $localip | cut -d"." -f1,2,3`
 iprange=`echo $network".0/"$netCIDR`
 
 
+# Determine external IP
+# Of course, http requests also work in netcat, i.e. 
+# `echo -e 'GET / HTTP/1.1\r\nHost: icanhazip.com\r\n\r\n' | nc icanhazip.com 80`
+# But, it is unlikely we have nc on the system if we're using this script to portscan
 if test $(which curl); then
-	getip=`curl -s icanhazip.com`
+	getip=`curl -s icanhazip.com` # whatismyip.akamai.com may be a consistently faster option
 elif test $(which wget); then
 	getip=`wget -O- -q icanhazip.com`
 elif test $(which dig); then
 	getip=`dig +short myip.opendns.com @resolver1.opendns.com`
+elif test $(which telnet); then
+	getip=`telnet telnetmyip.com 2>/dev/null | grep ^\"ip | cut -d"\"" -f4`
+elif test $(which ssh); then
+	# Not usually a great idea to disable StrictHostKeyChecking, but
+	# in this case, we aren't doing anything sensitive in the connection.
+	# Leaving it enabled will prompt for confirming key on first connection,
+	# rather than simply returning the output we want
+	getip=`ssh -o StrictHostKeyChecking=no sshmyip.com 2>/dev/null |  grep ^\"ip | cut -d"\"" -f4`
+else
+	#We probably have enough methods above to make failure relatively unlikely,
+	#but, catching this just in case
+	getip="Failed to determine. Host may not have external connectivity."
 fi
 
 echo -e "\nLocal IP:\t\t$localip"
@@ -90,6 +114,7 @@ echo -e "Netmask:\t\t$iprange"
 echo -e "External IP:\t\t$getip"
 echo -e "Default Interface:\t$default_interface"
 
+# Find hosts in network range for port scanning
 pingsweep(){
 for ip in {1..254}; do
 	if test $(which arping); then
@@ -101,7 +126,9 @@ for ip in {1..254}; do
 done;
 }
 
-
+# Port list
+# Default: takes a subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
+# Custom: User input from "-p | --ports" flags, either as a comman-separated list or a range
 if [[ -z "$ports" ]]; then
 	# TCP ports from the nmap database ordered by frequency of use
 	# `cat /usr/share/nmap/nmap-services | grep -v "udp" | tail -n +23 | sort -r -k3 | column -t | awk '{print $2}' | cut -d"/" -f1 | tr '\n' ' '`
@@ -111,14 +138,21 @@ elif [[ ! -z $(grep -i , <<< $ports) ]]; then # is this a comman-separated list 
 	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
 elif [[ ! -z $(grep -i - <<< $ports) ]]; then # is this a range of ports?
 	IFS='-' read start end <<< $ports
+	# this feels kludgy... perhaps a better method exists?
 	ports=()
 	i=$start
 	while [ $i -le $end ]; do
 		ports+=($i)
 		let i=i+1
 	done
+else
+	# Check that a single port entered via the -p flag is in fact an integer; otherwise display usage
+	if ! [ "$ports" -eq "$ports" ] 2>/dev/null; then
+		usage
+	fi
 fi
 
+# Scan ports
 portscan(){
 for host in $(cat /tmp/livehosts.txt);
 do for port in ${ports[@]};
@@ -131,12 +165,15 @@ if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
 	echo -ne "\n[-] ARP ping disabled as root may be required, --help for more information"
 fi
 
+# Indicate which sweep method(s) will be used
 if test ! $(which arping); then
-	echo -ne "\n[+] Sweeping for live hosts (ICMP)\n"
+	SWEEP_METHOD="ICMP"
 elif test $(which arping); then
-	echo -ne "\n[+] Sweeping for live hosts (ICMP + ARP)\n"
+	SWEEP_METHOD="ICMP + ARP"
 fi
+echo -ne "\n[+] Sweeping for live hosts ($SWEEP_METHOD)\n"
 
+# FIXME: Should the script clean this tmp file up after running?
 pingsweep | sort -V | uniq > /tmp/livehosts.txt
 count=`cat /tmp/livehosts.txt | wc -l`
 
