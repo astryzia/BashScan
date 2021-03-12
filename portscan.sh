@@ -7,18 +7,20 @@ usage() {
 	clear
 	echo "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
 Usage: " $PROGNAME " 
+	             [ -b | --banner ]        Attempt to grab banner during port scanning
 	             [ -h | --help ]          Show this help message and exit.
-	             [ -p | --ports PORTS ]   Comma-separated list or range of integers.
+	             [ -p | --ports PORTS ]   Comma-separated list or range of integers up to 65535.
 	             [ -r | --root ]          Force ARP ping to run even if user doesn't have root privileges.
 	             [ -t | --top-ports ]     Specify number of top TCP ports to scan (default = 20 )
-	             [ -v | --version ]       Print version and exit. "
+	             [ -v | --version ]       Print version and exit. 
+	             scan target"
 	exit 0
 }
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
-	-o hp:rt:v \
-	-l help,ports:,root,top-ports:,version \
+	-o bhp:rt:v \
+	-l banner,help,ports:,root,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -29,6 +31,7 @@ fi
 eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
 	case "$1" in
+		-b | --banner) BANNER=true                          ; shift 1 ;;
 		-p | --ports) ports="$2"                            ; shift 2 ;;
 		-t | --top-ports) TOP_PORTS="$2"                    ; shift 2 ;;
 		-r | --root) ROOT_CHECK=false                       ; shift   ;; 
@@ -43,17 +46,24 @@ while [ $# -gt 0 ]; do
 done
 
 # Default values for the script options
+: ${BANNER:=false}
 : ${ROOT_CHECK:=true}
+: ${LIVEHOSTS:="/tmp/livehosts.txt"}
 : ${TOP_PORTS:=20}
 
+# Sketch out ability to specify scan target
+# FIXME: Add validation for input format
+if [ ! -z "$@" 2>/dev/null ]; then
+	TARGET=$@
+fi
 
 # determine default network interface
-if test $(which ip); then
-	#FIXME: confirm that `ip route` field output is consistent across systems or use a different method
-	default_interface=`ip route | grep '^default' | cut -d" " -f5` 
-elif test $(which route); then
+if test $(which route); then
 	#Output of `route` should consistently show interface name as last field
 	default_interface=`route | grep '^default' | grep -o '[^ ]*$'`
+elif test $(which ip); then
+	#FIXME: confirm that `ip route` field output is consistent across systems or use a different method
+	default_interface=`ip route show default | cut -d" " -f5` 
 else 
 	# fallback to reading interface name from /proc
 	default_interface=`cat /proc/net/dev | grep -v lo | cut -d$'\n' -f3 | cut -d":" -f1`
@@ -84,7 +94,6 @@ fi
 network=`echo $localip | cut -d"." -f1,2,3`
 iprange=`echo $network".0/"$netCIDR`
 
-
 # Determine external IP
 # Of course, http requests also work in netcat, i.e. 
 # `echo -e 'GET / HTTP/1.1\r\nHost: icanhazip.com\r\n\r\n' | nc icanhazip.com 80`
@@ -114,21 +123,20 @@ echo -e "Netmask:\t\t$iprange"
 echo -e "External IP:\t\t$getip"
 echo -e "Default Interface:\t$default_interface"
 
-# Find hosts in network range for port scanning
-pingsweep(){
-for ip in {1..254}; do
-	if test $(which arping); then
-		if [ "$ROOT_CHECK" = false ] || [ "$EUID" = 0 ]; then
-			arping -c 1 -w 1 -I $default_interface $network.$ip 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
-		fi
+if [ ! -z $TARGET ]; then
+	echo -e "Target:\t\t\t$TARGET"
+fi
+
+# Use to check argument value is an integer (i.e. for validating input to -p flag)
+checkinteger(){
+	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
+		usage
 	fi
-	ping -c 1 -W 1 $network.$ip | tr \\n " " | awk '/1 received/ {print $2}' &
-done;
 }
 
 # Port list
-# Default: takes a subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
-# Custom: User input from "-p | --ports" flags, either as a comman-separated list or a range
+# Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
+# Custom:  User input from "-p | --ports" flags, either as a comma-separated list or a range
 if [[ -z "$ports" ]]; then
 	# TCP ports from the nmap database ordered by frequency of use
 	# `cat /usr/share/nmap/nmap-services | grep -v "udp" | tail -n +23 | sort -r -k3 | column -t | awk '{print $2}' | cut -d"/" -f1 | tr '\n' ' '`
@@ -136,8 +144,13 @@ if [[ -z "$ports" ]]; then
 	ports=(${tcp_ports[@]:0:$TOP_PORTS})
 elif [[ ! -z $(grep -i , <<< $ports) ]]; then # is this a comman-separated list of ports? 
 	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
+	for port in ${ports[@]}; do
+		checkinteger $port
+	done
 elif [[ ! -z $(grep -i - <<< $ports) ]]; then # is this a range of ports?
 	IFS='-' read start end <<< $ports
+	checkinteger $start
+	checkinteger $end
 	# this feels kludgy... perhaps a better method exists?
 	ports=()
 	i=$start
@@ -146,18 +159,45 @@ elif [[ ! -z $(grep -i - <<< $ports) ]]; then # is this a range of ports?
 		let i=i+1
 	done
 else
-	# Check that a single port entered via the -p flag is in fact an integer; otherwise display usage
-	if ! [ "$ports" -eq "$ports" ] 2>/dev/null; then
-		usage
-	fi
+	checkinteger $ports
 fi
+
+# Try grabbing banners
+banners(){
+	host="$1"
+	port="$2"
+	# Trimmed out all but first line of response to clean up long http replies
+	# Also removed trailing \r which is common in http responses
+	banner=`timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo "">&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " "`
+	if ! [ "$banner" = "" ]; then 
+		echo "("$banner")" 2>/dev/null
+	fi
+}
+
+# Find hosts in network range for port scanning
+pingsweep(){
+	network=$1
+	ip=$2
+	if test $(which arping); then
+		if [ "$ROOT_CHECK" = false ] || [ "$EUID" = 0 ]; then
+			arping -c 1 -w 1 -I $default_interface $network.$ip 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
+		fi
+	fi
+	ping -c 1 -W 1 $network.$ip | tr \\n " " | awk '/1 received/ {print $2}' &
+}
 
 # Scan ports
 portscan(){
-for host in $(cat /tmp/livehosts.txt);
-do for port in ${ports[@]};
-	do (echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open" &
-        done;
+for host in $(cat $LIVEHOSTS);
+do 
+	for port in ${ports[@]};
+	do 
+		if [ "$BANNER" = true ]; then
+			(echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open "`banners $host $port 2>/dev/null` &
+		else
+			(echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open" &
+		fi
+    done;
 done;
 }
 
@@ -173,9 +213,28 @@ elif test $(which arping); then
 fi
 echo -ne "\n[+] Sweeping for live hosts ($SWEEP_METHOD)\n"
 
-# FIXME: Should the script clean this tmp file up after running?
-pingsweep | sort -V | uniq > /tmp/livehosts.txt
-count=`cat /tmp/livehosts.txt | wc -l`
+# Adapt pingsweep call to account for single host targeting method
+if [ ! -z $TARGET ]; then
+	network=`echo $TARGET | cut -d"." -f1,2,3`
+	ip=`echo $TARGET | cut -d"." -f4`
+	pingsweep $network $ip >> $LIVEHOSTS
+else
+	for ip in {1..254}; do
+		pingsweep $network $ip >> $LIVEHOSTS
+	done;
+fi
 
-echo -ne "[+] $count hosts found\n[+] Beginning scan of ${#ports[*]} total ports\n\n"
-portscan | sort -V | uniq
+if test -e $LIVEHOSTS; then
+	count=`cat $LIVEHOSTS | wc -l`
+	if [ "$count" -gt 0 ]; then
+		echo -ne "[+] $count hosts found\n[+] Beginning scan of ${#ports[*]} total ports\n\n"
+		portscan | sort -V | uniq
+	fi
+else
+	echo -ne "[+] No responsive hosts found\n\n"
+fi
+
+# Cleanup tmp file
+if test -e $LIVEHOSTS; then
+	rm $LIVEHOSTS
+fi
