@@ -11,13 +11,14 @@ usage() {
 	clear
 	echo "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
 Usage: " $PROGNAME " 
-	[ -b | --banner ]        Attempt to grab banner during port scanning
-	[ -h | --help ]          Show this help message and exit.
-	[ -p | --ports PORTS ]   Comma-separated list or range of integers up to 65535.
-	[ -r | --root ]          Force ARP ping to run even if user doesn't have root privileges.
-	[ -t | --top-ports ]     Specify number of top TCP ports to scan (default = 20 )
-	[ -v | --version ]       Print version and exit. 
-	target {x.x.x.x}"
+	[ -b | --banner ]         Attempt to grab banner during port scanning
+	[ -h | --help ]           Show this help message and exit.
+	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
+	[ -r | --root ]           Force ARP ping to run even if user doesn't have root privileges.
+	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
+	[ -T | --timing <0-5> ]   Timing template (default = )        
+	[ -v | --version ]        Print version and exit. 
+	<x.x.x.x>                 Target IP (optional)"
 	exit 0
 }
 
@@ -27,8 +28,8 @@ Usage: " $PROGNAME "
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
-	-o bhp:rt:v \
-	-l banner,help,ports:,root,top-ports:,version \
+	-o bhp:rtT:v \
+	-l banner,help,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -42,6 +43,7 @@ while [ $# -gt 0 ]; do
 		-b | --banner) BANNER=true                          ; shift 1 ;;
 		-p | --ports) ports="$2"                            ; shift 2 ;;
 		-t | --top-ports) TOP_PORTS="$2"                    ; shift 2 ;;
+		-T | --timing) TIMING="$2"                          ; shift 2 ;;
 		-r | --root) ROOT_CHECK=false                       ; shift   ;; 
 		-h | --help) usage                                  ; exit 0  ;;
 		-v | --version) echo "$PROGNAME $VERSION"           ; exit 0  ;;
@@ -58,6 +60,7 @@ done
 ########################################
 : ${BANNER:=false}
 : ${ROOT_CHECK:=true}
+: ${TIMING:=4}
 : ${TOP_PORTS:=20}
 
 #######################################
@@ -238,6 +241,28 @@ else
 fi
 echo -ne "\n[+] Sweeping for live hosts ($SWEEP_METHOD)\n"
 
+# Timing options (initially based on nmap Maximum TCP scan delay settings)
+# nmap values are in milliseconds - converted here for bash sleep in seconds
+case $TIMING in
+	0 )
+		DELAY=300
+		;;
+	1 )
+		DELAY=15
+		;;
+	2 )
+		DELAY=1
+		;;
+	3 )
+		DELAY=.1
+		;;
+	4 )
+		DELAY=.010
+		;;
+	5 )
+		DELAY=.005
+		;;	
+esac
 
 ########################################
 # Scanning functions
@@ -263,7 +288,8 @@ pingsweep(){
 # Scan ports
 portscan(){
 for host in ${LIVEHOSTS[@]}; do
-	for port in ${ports[@]}; do 
+	for port in ${ports[@]}; do
+		sleep $DELAY
 		if [ "$BANNER" = true ]; then
 			(echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open "`banners $host $port 2>/dev/null` &
 		else
