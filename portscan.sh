@@ -3,19 +3,27 @@
 readonly PROGNAME='portscan.sh'
 readonly VERSION='0.0.1'
 
+########################################
+# help/usage 
+########################################
+
 usage() {
 	clear
 	echo "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
 Usage: " $PROGNAME " 
-	             [ -b | --banner ]        Attempt to grab banner during port scanning
-	             [ -h | --help ]          Show this help message and exit.
-	             [ -p | --ports PORTS ]   Comma-separated list or range of integers up to 65535.
-	             [ -r | --root ]          Force ARP ping to run even if user doesn't have root privileges.
-	             [ -t | --top-ports ]     Specify number of top TCP ports to scan (default = 20 )
-	             [ -v | --version ]       Print version and exit. 
-	             scan target"
+	[ -b | --banner ]        Attempt to grab banner during port scanning
+	[ -h | --help ]          Show this help message and exit.
+	[ -p | --ports PORTS ]   Comma-separated list or range of integers up to 65535.
+	[ -r | --root ]          Force ARP ping to run even if user doesn't have root privileges.
+	[ -t | --top-ports ]     Specify number of top TCP ports to scan (default = 20 )
+	[ -v | --version ]       Print version and exit. 
+	target {x.x.x.x}"
 	exit 0
 }
+
+########################################
+# Argument handling
+########################################
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
@@ -45,15 +53,61 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+########################################
 # Default values for the script options
+########################################
 : ${BANNER:=false}
 : ${ROOT_CHECK:=true}
-: ${LIVEHOSTS:="/tmp/livehosts.txt"}
 : ${TOP_PORTS:=20}
 
-# Sketch out ability to specify scan target
-# FIXME: Add validation for input format
-if [ ! -z "$@" 2>/dev/null ]; then
+#######################################
+# Validation Functions
+########################################
+
+# Test an IP address for validity
+# Credit: Mitch Frazier
+# Reference: https://www.linuxjournal.com/content/validating-ip-address-bash-script
+# Usage:
+#      valid_ip IP_ADDRESS
+#      if [[ $? -eq 0 ]]; then echo good; else echo bad; fi
+#   OR
+#      if valid_ip IP_ADDRESS; then echo good; else echo bad; fi
+#
+function valid_ip()
+{
+    local  ip=$1
+    local  stat=1
+
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        OIFS=$IFS
+        IFS='.'
+        ip=($ip)
+        IFS=$OIFS
+        [[ ${ip[0]} -le 255 && ${ip[1]} -le 255 \
+            && ${ip[2]} -le 255 && ${ip[3]} -le 255 ]]
+        stat=$?
+    fi
+    return $stat
+}
+
+# Validate port inputs:
+# Redirects to usage if port value is either not an integer or outside of 1-65535 range
+isPort(){
+	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
+		usage
+	elif ! ((0 < "$1" && "$1" < 65536)); then
+		usage
+	fi
+}
+
+########################################
+# Determine values in prep for scanning
+########################################
+
+# Override default /24 scan with a single target specified by user
+if [ ! -z "$@" 2>/dev/null ] && ! valid_ip "$@"; then
+	usage
+else
 	TARGET=$@
 fi
 
@@ -84,9 +138,9 @@ elif test $(which ifconfig); then
     done
     netCIDR=$c
 else
-        localip=`hostname -I | cut -d" " -f1`
-        # FIXME: in an edge case where neither ifconfig nor iproute2 utils are available
-        #        need to get CIDR some other way
+    localip=`hostname -I | cut -d" " -f1`
+    # FIXME: in an edge case where neither ifconfig nor iproute2 utils are available
+    #        need to get CIDR some other way
 fi
 
 ## FIXME: these values for network and iprange are only valid for /24 CIDRs.
@@ -95,27 +149,32 @@ network=`echo $localip | cut -d"." -f1,2,3`
 iprange=`echo $network".0/"$netCIDR`
 
 # Determine external IP
-# Of course, http requests also work in netcat, i.e. 
-# `echo -e 'GET / HTTP/1.1\r\nHost: icanhazip.com\r\n\r\n' | nc icanhazip.com 80`
-# But, it is unlikely we have nc on the system if we're using this script to portscan
-if test $(which curl); then
-	getip=`curl -s icanhazip.com` # whatismyip.akamai.com may be a consistently faster option
-elif test $(which wget); then
-	getip=`wget -O- -q icanhazip.com`
-elif test $(which dig); then
-	getip=`dig +short myip.opendns.com @resolver1.opendns.com`
-elif test $(which telnet); then
-	getip=`telnet telnetmyip.com 2>/dev/null | grep ^\"ip | cut -d"\"" -f4`
-elif test $(which ssh); then
-	# Not usually a great idea to disable StrictHostKeyChecking, but
-	# in this case, we aren't doing anything sensitive in the connection.
-	# Leaving it enabled will prompt for confirming key on first connection,
-	# rather than simply returning the output we want
-	getip=`ssh -o StrictHostKeyChecking=no sshmyip.com 2>/dev/null |  grep ^\"ip | cut -d"\"" -f4`
-else
-	#We probably have enough methods above to make failure relatively unlikely,
-	#but, catching this just in case
-	getip="Failed to determine. Host may not have external connectivity."
+# Try /dev/tcp method first
+httpextip="icanhazip.com"
+conn="'GET / HTTP/1.1\r\nhost: ' $httpextip '\r\n\r\n'"
+response=`timeout 0.5s bash -c "exec 3<>/dev/tcp/$httpextip/80; echo -e $conn>&3; cat<&3" | tail -1`
+
+# If the above method fails, then fallback to builtin utils for this
+if ! valid_ip response; then
+	if test $(which curl); then
+		getip=`curl -s $httpextip` # whatismyip.akamai.com may be a consistently faster option
+	elif test $(which wget); then
+		getip=`wget -O- -q $httpextip`
+	elif test $(which dig); then
+		getip=`dig +short myip.opendns.com @resolver1.opendns.com`
+	elif test $(which telnet); then
+		getip=`telnet telnetmyip.com 2>/dev/null | grep ^\"ip | cut -d"\"" -f4`
+	elif test $(which ssh); then
+		# Not usually a great idea to disable StrictHostKeyChecking, but
+		# in this case, we aren't doing anything sensitive in the connection.
+		# Leaving it enabled will prompt for confirming key on first connection,
+		# rather than simply returning the output we want
+		getip=`ssh -o StrictHostKeyChecking=no sshmyip.com 2>/dev/null |  grep ^\"ip | cut -d"\"" -f4`
+	else
+		#We probably have enough methods above to make failure relatively unlikely,
+		#but, catching this just in case
+		getip="Failed to determine. Host may not have external connectivity."
+	fi
 fi
 
 echo -e "\nLocal IP:\t\t$localip"
@@ -126,13 +185,6 @@ echo -e "Default Interface:\t$default_interface"
 if [ ! -z $TARGET ]; then
 	echo -e "Target:\t\t\t$TARGET"
 fi
-
-# Use to check argument value is an integer (i.e. for validating input to -p flag)
-checkinteger(){
-	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
-		usage
-	fi
-}
 
 # Port list
 # Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
@@ -145,12 +197,11 @@ if [[ -z "$ports" ]]; then
 elif [[ ! -z $(grep -i , <<< $ports) ]]; then # is this a comman-separated list of ports? 
 	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
 	for port in ${ports[@]}; do
-		checkinteger $port
+		isPort $port
 	done
 elif [[ ! -z $(grep -i - <<< $ports) ]]; then # is this a range of ports?
 	IFS='-' read start end <<< $ports
-	checkinteger $start
-	checkinteger $end
+	isPort $start && isPort $end
 	# this feels kludgy... perhaps a better method exists?
 	ports=()
 	i=$start
@@ -159,7 +210,7 @@ elif [[ ! -z $(grep -i - <<< $ports) ]]; then # is this a range of ports?
 		let i=i+1
 	done
 else
-	checkinteger $ports
+	isPort $ports
 fi
 
 # Try grabbing banners
@@ -174,24 +225,45 @@ banners(){
 	fi
 }
 
-# Find hosts in network range for port scanning
-pingsweep(){
-	network=$1
-	ip=$2
-	if test $(which arping); then
-		if [ "$ROOT_CHECK" = false ] || [ "$EUID" = 0 ]; then
-			arping -c 1 -w 1 -I $default_interface $network.$ip 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
-		fi
+# Determine which pingsweep method(s) will be used
+if test $(which arping); then
+	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
+		echo -ne "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+		SWEEP_METHOD="ICMP"
+	else
+		SWEEP_METHOD="ICMP + ARP"
 	fi
-	ping -c 1 -W 1 $network.$ip | tr \\n " " | awk '/1 received/ {print $2}' &
+else
+	SWEEP_METHOD="ICMP"
+fi
+echo -ne "\n[+] Sweeping for live hosts ($SWEEP_METHOD)\n"
+
+
+########################################
+# Scanning functions
+########################################
+
+# Check single TARGET for response before port scanning
+pingcheck(){
+	TARGET=$1
+	if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
+		arping -c 1 -w 1 -I $default_interface $TARGET 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
+	fi
+	ping -c 1 -W 1 $TARGET | tr \\n " " | awk '/1 received/ {print $2}' &
+}
+
+# Ping multiple hosts
+pingsweep(){
+	for ip in {1..254}; do
+		TARGET="$network.$ip"
+		pingcheck "$TARGET"
+	done;
 }
 
 # Scan ports
 portscan(){
-for host in $(cat $LIVEHOSTS);
-do 
-	for port in ${ports[@]};
-	do 
+for host in ${LIVEHOSTS[@]}; do
+	for port in ${ports[@]}; do 
 		if [ "$BANNER" = true ]; then
 			(echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open "`banners $host $port 2>/dev/null` &
 		else
@@ -201,40 +273,19 @@ do
 done;
 }
 
-if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
-	echo -ne "\n[-] ARP ping disabled as root may be required, --help for more information"
-fi
-
-# Indicate which sweep method(s) will be used
-if test ! $(which arping); then
-	SWEEP_METHOD="ICMP"
-elif test $(which arping); then
-	SWEEP_METHOD="ICMP + ARP"
-fi
-echo -ne "\n[+] Sweeping for live hosts ($SWEEP_METHOD)\n"
-
-# Adapt pingsweep call to account for single host targeting method
+# Single ping for custom target, otherwise sweep
 if [ ! -z $TARGET ]; then
-	network=`echo $TARGET | cut -d"." -f1,2,3`
-	ip=`echo $TARGET | cut -d"." -f4`
-	pingsweep $network $ip >> $LIVEHOSTS
+	LIVEHOSTS=($(pingcheck $TARGET | sort -V | uniq ))
 else
-	for ip in {1..254}; do
-		pingsweep $network $ip >> $LIVEHOSTS
-	done;
+	LIVEHOSTS=($(pingsweep | sort -V | uniq))
 fi
 
-if test -e $LIVEHOSTS; then
-	count=`cat $LIVEHOSTS | wc -l`
+if [ ${#LIVEHOSTS[@]} -ne 0 ]; then
+	count=${#LIVEHOSTS[@]}
 	if [ "$count" -gt 0 ]; then
 		echo -ne "[+] $count hosts found\n[+] Beginning scan of ${#ports[*]} total ports\n\n"
 		portscan | sort -V | uniq
 	fi
 else
 	echo -ne "[+] No responsive hosts found\n\n"
-fi
-
-# Cleanup tmp file
-if test -e $LIVEHOSTS; then
-	rm $LIVEHOSTS
 fi
