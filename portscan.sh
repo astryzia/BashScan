@@ -9,16 +9,16 @@ readonly VERSION='0.0.1'
 
 usage() {
 	clear
-	echo "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
-Usage: " $PROGNAME " 
+	printf "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
+Usage:  %s
 	[ -b | --banner ]         Attempt to grab banner during port scanning
 	[ -h | --help ]           Show this help message and exit.
 	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
 	[ -r | --root ]           Force ARP ping to run even if user doesn't have root privileges.
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
-	[ -T | --timing <0-5> ]   Timing template (default = )        
-	[ -v | --version ]        Print version and exit. 
-	<x.x.x.x>                 Target IP (optional)"
+	[ -T | --timing <0-5> ]   Timing template (default = )
+	[ -v | --version ]        Print version and exit.
+	<x.x.x.x>                 Target IP (optional)\n\n" $PROGNAME
 	exit 0
 }
 
@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
 		--) shift; break;;
     	# If invalid options were passed, then getopt should have reported an error,
     	# which we checked as VALID_ARGUMENTS when getopt was called...
-    	*) echo "Unexpected option: $1 - this should not happen."
+    	*) printf "Unexpected option: %s - this should not happen." $1
 		usage ;;
 	esac
 done
@@ -180,13 +180,13 @@ if ! valid_ip response; then
 	fi
 fi
 
-echo -e "\nLocal IP:\t\t$localip"
-echo -e "Netmask:\t\t$iprange"
-echo -e "External IP:\t\t$getip"
-echo -e "Default Interface:\t$default_interface"
+printf "\nLocal IP:\t\t%s\n" $localip
+printf "Netmask:\t\t%s\n" $iprange
+printf "External IP:\t\t%s\n" $getip
+printf "Default Interface:\t%s\n" $default_interface
 
 if [ ! -z $TARGET ]; then
-	echo -e "Target:\t\t\t$TARGET"
+	printf "Target:\t\t\t%s\n" $TARGET
 fi
 
 # Port list
@@ -224,14 +224,14 @@ banners(){
 	# Also removed trailing \r which is common in http responses
 	banner=`timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo "">&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " "`
 	if ! [ "$banner" = "" ]; then 
-		echo "("$banner")" 2>/dev/null
+		echo "(" $banner")" 2>/dev/null
 	fi
 }
 
 # Determine which pingsweep method(s) will be used
 if test $(which arping); then
 	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
-		echo -ne "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
 		SWEEP_METHOD="ICMP"
 	else
 		SWEEP_METHOD="ICMP + ARP"
@@ -239,29 +239,17 @@ if test $(which arping); then
 else
 	SWEEP_METHOD="ICMP"
 fi
-echo -ne "\n[+] Sweeping for live hosts ($SWEEP_METHOD)\n"
+printf "\n[+] Sweeping for live hosts (%s)\n" $SWEEP_METHOD
 
 # Timing options (initially based on nmap Maximum TCP scan delay settings)
 # nmap values are in milliseconds - converted here for bash sleep in seconds
 case $TIMING in
-	0 )
-		DELAY=300
-		;;
-	1 )
-		DELAY=15
-		;;
-	2 )
-		DELAY=1
-		;;
-	3 )
-		DELAY=.1
-		;;
-	4 )
-		DELAY=.010
-		;;
-	5 )
-		DELAY=.005
-		;;	
+	0 ) DELAY=300    ;;
+	1 )	DELAY=15     ;;
+	2 )	DELAY=1      ;;
+	3 )	DELAY=.1     ;;
+	4 )	DELAY=.010   ;;
+	5 )	DELAY=.005   ;;	
 esac
 
 ########################################
@@ -285,18 +273,32 @@ pingsweep(){
 	done;
 }
 
+# Get portscan results from array(s) and format in nmap-ish style
+scanreport(){
+	IFS=$'\n'
+	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+	unset IFS
+	for port in ${sorted[@]}; do
+		printf "%s\topen" $port
+		if [ "$BANNER" = true ]; then
+			printf " %s\n" "${BANNERS[$port]}"
+		else
+			printf "\n"
+		fi
+	done;
+}
+
 # Scan ports
 portscan(){
-for host in ${LIVEHOSTS[@]}; do
+	LIVEPORTS=()
+	BANNERS=()
 	for port in ${ports[@]}; do
 		sleep $DELAY
+		(echo >/dev/tcp/$host/$port) >& /dev/null && LIVEPORTS+=($port)
 		if [ "$BANNER" = true ]; then
-			(echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open "`banners $host $port 2>/dev/null` &
-		else
-			(echo >/dev/tcp/$host/$port) >& /dev/null && echo "$host:$port is open" &
+			BANNERS[$port]=$(banners $host $port 2>/dev/null)
 		fi
-    done;
-done;
+	done;
 }
 
 # Single ping for custom target, otherwise sweep
@@ -309,9 +311,17 @@ fi
 if [ ${#LIVEHOSTS[@]} -ne 0 ]; then
 	count=${#LIVEHOSTS[@]}
 	if [ "$count" -gt 0 ]; then
-		echo -ne "[+] $count hosts found\n[+] Beginning scan of ${#ports[*]} total ports\n\n"
+		printf "[+] $count hosts found\n[+] Beginning scan of %s total ports\n\n" ${#ports[*]}
 		portscan | sort -V | uniq
 	fi
 else
-	echo -ne "[+] No responsive hosts found\n\n"
+	printf "[+] No responsive hosts found\n\n"
 fi
+
+for host in ${LIVEHOSTS[@]}; do
+	printf "Scan report for %s:\n" $host
+	printf "PORT\tSTATE\n"
+	portscan $host
+	scanreport
+	printf "\n"
+done;
