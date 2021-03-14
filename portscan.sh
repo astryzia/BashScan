@@ -228,6 +228,24 @@ banners(){
 	fi
 }
 
+# Attempt reverse DNS resolution of target addresses
+revdns(){
+	ip=$1
+	if test $(which dig); then
+		name=$(dig +short +answer -x $ip | sed 's/.$//')
+	elif test $(which nslookup); then
+		name=$(nslookup $ip | cut -d$'\n' -f1 | grep -o '[^ ]*$' | sed 's/.$//')
+	elif test $(which host); then
+		name=$(host $ip | grep -o '[^ ]*$' | sed 's/.$//')
+	fi
+
+	if [ ! -z $name ]; then
+		printf $name 2>/dev/null
+	else
+		printf "NXDOMAIN"
+	fi
+}
+
 # Determine which pingsweep method(s) will be used
 if test $(which arping); then
 	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
@@ -319,7 +337,8 @@ else
 fi
 
 for host in ${LIVEHOSTS[@]}; do
-	printf "Scan report for %s:\n" $host
+	name=$(revdns $host)
+	printf "Scan report for %s (%s):\n" $name $host
 	printf "PORT\tSTATE\n"
 	portscan $host
 	scanreport
