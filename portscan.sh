@@ -30,7 +30,7 @@ Usage:  %s
 . $(pwd)/lib/validations.sh
 . $(pwd)/lib/core.sh
 . $(pwd)/lib/definitions.sh
-. $(pwd)/lib/tcp_ports.sh
+# . $(pwd)/lib/tcp_ports.sh			# Commented out for HOTFIX -- array does not currently work when separated into its 									  own individual library. Placed port list back inside core.sh lib.
 
 ########################################
 # Scanning functions
@@ -105,7 +105,7 @@ for host in ${LIVEHOSTS[@]}; do
 	printf "Scan report for %s (%s):\n" $name $host
 	closed_ports=$((${#ports[@]}-$count_liveports))
 	if [ "$closed_ports" -ne 0 ]; then
-		printf "Not shown: %s closed ports\n" $closed_ports
+		printf "Not shown: %s closed port(s)\n" $closed_ports
 	fi
 	printf "PORT\tSTATE\n"
 	scanreport
