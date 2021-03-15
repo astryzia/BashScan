@@ -264,7 +264,7 @@ if test $(which arping); then
 		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
 		SWEEP_METHOD="ICMP"
 	else
-		SWEEP_METHOD="ICMP + ARP"
+		SWEEP_METHOD="ICMP/ARP"
 	fi
 else
 	SWEEP_METHOD="ICMP"
