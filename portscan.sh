@@ -16,7 +16,7 @@ Usage:  %s
 	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
 	[ -r | --root ]           Force ARP ping to run even if user doesn't have root privileges.
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
-	[ -T | --timing <0-5> ]   Timing template (default = )
+	[ -T | --timing <0-5> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
 	<x.x.x.x>                 Target IP (optional)\n\n" $PROGNAME
 	exit 0
@@ -28,7 +28,7 @@ Usage:  %s
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
-	-o bhp:rtT:v \
+	-o bhp:rt:T:v \
 	-l banner,help,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
@@ -76,7 +76,7 @@ done
 #   OR
 #      if valid_ip IP_ADDRESS; then echo good; else echo bad; fi
 #
-function valid_ip()
+valid_ip()
 {
     local  ip=$1
     local  stat=1
@@ -93,6 +93,16 @@ function valid_ip()
     return $stat
 }
 
+# Validate timing flag is in range
+valid_timing(){
+	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
+		usage
+	elif (( "$1" < 0 || "$1" > 5)); then
+		printf $TIMING
+		usage
+	fi
+}
+
 # Validate port inputs:
 # Redirects to usage if port value is either not an integer or outside of 1-65535 range
 isPort(){
@@ -106,6 +116,8 @@ isPort(){
 ########################################
 # Determine values in prep for scanning
 ########################################
+
+valid_timing $TIMING
 
 # Override default /24 scan with a single target specified by user
 if [[ -n "$@" ]] && ! valid_ip "$@"; then
