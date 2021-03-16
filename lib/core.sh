@@ -100,9 +100,9 @@ fi
 # Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
 # Custom:  User input from "-p | --ports" flags, either as a comma-separated list or a range
 if [ -z "$ports" ]; then
-	# TCP ports from the nmap database ordered by frequency of use
-	# `cat /usr/share/nmap/nmap-services | grep -v "udp" | tail -n +23 | sort -r -k3 | column -t | awk '{print $2}' | cut -d"/" -f1 | tr '\n' ' '`
-	tcp_ports=($(cat lib/tcp_ports.txt))
+	# TCP ports from the nmap database ordered by frequency of use, stored in nmap-services:
+	# `cat /usr/share/nmap/nmap-services | grep "tcp" | sort -r -k3 | column -t | tr -s " "`
+	tcp_ports=($(cat lib/nmap-services | cut -d" " -f2 | cut -d"/" -f1 | tr $'\n' " "))
 	ports=(${tcp_ports[@]:0:$TOP_PORTS})
 elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list of ports? 
 	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing

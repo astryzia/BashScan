@@ -59,7 +59,8 @@ scanreport(){
 	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
 	unset IFS
 	for port in ${sorted[@]}; do
-		printf "%s\topen" $port
+		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+		printf "%s\topen\t%s" $port $service
 		if [ "$BANNER" = true ]; then
 			printf " %s\n" "${BANNERS[$port]}"
 		else
@@ -107,7 +108,7 @@ for host in ${LIVEHOSTS[@]}; do
 	if [ "$closed_ports" -ne 0 ]; then
 		printf "Not shown: %s closed port(s)\n" $closed_ports
 	fi
-	printf "PORT\tSTATE\n"
+	printf "PORT\tSTATE\tSERVICE\n"
 	scanreport
 	printf "\n"
 done;
