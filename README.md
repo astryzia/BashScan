@@ -10,9 +10,9 @@ For users with more environmental flexibility, simply clone the repository and e
 
 **SSH** `git clone git@github.com:astryzia/BashScan.git`
 
-On more limited systems, the `bashscan.sh` script can be downloaded and ran as a monolithic all-in-one solution. Included in the repository is a script named `unify.sh` that will combine all libraries and functions into the independent `bashscan.sh` script for those who make tweaks and/or port the script elsewhere for use.
-
 `chmod +x *.sh lib/*.sh`
+
+On more limited systems, the `bashscan.sh` script can be downloaded and ran as a monolithic all-in-one solution. Included in the repository is a script named `unify.sh` that will combine all libraries and functions into the independent `bashscan.sh` script for those who make tweaks and/or port the script elsewhere for use.
 
 # How to use
 
