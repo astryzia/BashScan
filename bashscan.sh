@@ -1,3 +1,110 @@
+#!/bin/bash
+
+readonly PROGNAME='BashScan'
+readonly VERSION='0.0.6'
+
+########################################
+# help/usage 
+########################################
+
+usage() {
+	clear
+	printf "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
+Usage:  %s
+	[ -b | --banner ]         Attempt to grab banner during port scanning
+	[ -h | --help ]           Show this help message and exit.
+	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
+	[ -r | --root ]           Force ARP ping to run even if user doesn't have root privileges.
+	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
+	[ -T | --timing <0-6> ]   Timing template (default = 4)
+	[ -v | --version ]        Print version and exit.
+	<x.x.x.x> OR <x.x.x.x-y>  Target IP (optional)\n\n" $PROGNAME
+	exit 0
+}
+
+
+########################################
+# Argument handling
+########################################
+
+PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
+	-a \
+	-o bhp:rt:T:v \
+	-l banner,help,ports:,root,timing:,top-ports:,version \
+	-- "$@")
+VALID_ARGUMENTS=$?
+
+if [ "$VALID_ARGUMENTS" != "0" ]; then
+  usage
+fi
+
+eval set -- "$PARSED_ARGUMENTS"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-b | --banner) BANNER=true                          ; shift 1 ;;
+		-p | --ports) ports="$2"                            ; shift 2 ;;
+		-t | --top-ports) TOP_PORTS="$2"                    ; shift 2 ;;
+		-T | --timing) TIMING="$2"                          ; shift 2 ;;
+		-r | --root) ROOT_CHECK=false                       ; shift   ;; 
+		-h | --help) usage                                  ; exit 0  ;;
+		-v | --version) echo "$PROGNAME $VERSION"           ; exit 0  ;;
+		--) shift; break;;
+    	# If invalid options were passed, then getopt should have reported an error,
+    	# which we checked as VALID_ARGUMENTS when getopt was called...
+    	*) printf "Unexpected option: %s - this should not happen." $1
+		usage ;;
+	esac
+done
+
+#######################################
+# Validation Functions
+########################################
+
+# Test an IP address for validity
+# Credit: Mitch Frazier
+# Reference: https://www.linuxjournal.com/content/validating-ip-address-bash-script
+# Usage:
+#      valid_ip IP_ADDRESS
+#      if [[ $? -eq 0 ]]; then echo good; else echo bad; fi
+#   OR
+#      if valid_ip IP_ADDRESS; then echo good; else echo bad; fi
+#
+valid_ip()
+{
+    local  ip=$1
+    local  stat=1
+
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        OIFS=$IFS
+        IFS='.'
+        ip=($ip)
+        IFS=$OIFS
+        [[ ${ip[0]} -le 255 && ${ip[1]} -le 255 \
+            && ${ip[2]} -le 255 && ${ip[3]} -le 255 ]]
+        stat=$?
+    fi
+    return $stat
+}
+
+# Validate timing flag is in range
+valid_timing(){
+	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
+		usage
+	elif (( "$1" < 0 || "$1" > 6)); then
+		printf $TIMING
+		usage
+	fi
+}
+
+# Validate port inputs:
+# Redirects to usage if port value is either not an integer or outside of 1-65535 range
+isPort(){
+	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
+		usage
+	elif ! ((0 < "$1" && "$1" < 65536)); then
+		usage
+	fi
+}
 
 ########################################
 # Default values for the script options
@@ -207,3 +314,94 @@ case $TIMING in
 	5 )	DELAY=.005   ;;
 	6 )	DELAY=0      ;;
 esac
+
+########################################
+# Scanning functions
+########################################
+
+# Check single TARGET for response before port scanning
+pingcheck(){
+	TARGET=$1
+	if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
+		arping -c 1 -w 1 -I $default_interface $TARGET 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
+	fi
+	ping -c 1 -W 1 $TARGET | tr \\n " " | awk '/1 received/ {print $2}' &
+}
+
+# Ping multiple hosts
+pingsweep(){
+	if [ -n "$TARGETS" ]; then
+		for ip in ${TARGETS[@]}; do
+			pingcheck "$ip"
+		done;
+	else
+		for ip in {1..254}; do
+			TARGET="$network.$ip"
+			pingcheck "$TARGET"
+		done;
+	fi
+}
+
+# Get portscan results from array(s) and format in nmap-ish style
+scanreport(){
+	IFS=$'\n'
+	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+	unset IFS
+	for port in ${sorted[@]}; do
+		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+		printf "%s\topen\t%s" $port $service
+		if [ "$BANNER" = true ]; then
+			printf " %s\n" "${BANNERS[$port]}"
+		else
+			printf "\n"
+		fi
+	done;
+}
+
+# Scan ports
+portscan(){
+	LIVEPORTS=()
+	BANNERS=()
+	for port in ${ports[@]}; do
+		sleep $DELAY
+		(echo >/dev/tcp/$host/$port) >& /dev/null && LIVEPORTS+=($port)
+		if [ "$BANNER" = true ]; then
+			BANNERS[$port]=$(banners $host $port 2>/dev/null)
+		fi
+	done;
+	count_liveports=${#LIVEPORTS[@]}
+}
+
+########################################
+# Main function
+########################################
+
+# Single ping for custom target, otherwise sweep
+if [ -n "$TARGET" ] && [ -z "$TARGETS" ]; then
+	LIVEHOSTS=($(pingcheck $TARGET | sort -V | uniq ))
+else
+	LIVEHOSTS=($(pingsweep | sort -V | uniq))
+fi
+
+if [ ${#LIVEHOSTS[@]} -ne 0 ]; then
+	count=${#LIVEHOSTS[@]}
+	if [ "$count" -gt 0 ]; then
+		printf "[+] $count hosts found\n[+] Beginning scan of %s total port(s)\n\n" ${#ports[*]}
+		portscan | sort -V | uniq
+	fi
+else
+	printf "[+] No responsive hosts found\n\n"
+fi
+
+for host in ${LIVEHOSTS[@]}; do
+	name=$(revdns $host)
+	portscan $host
+	printf "Scan report for %s (%s):\n" $name $host
+	closed_ports=$((${#ports[@]}-$count_liveports))
+	if [ "$closed_ports" -ne 0 ]; then
+		printf "Not shown: %s closed port(s)\n" $closed_ports
+	fi
+	printf "PORT\tSTATE\tSERVICE\n"
+	scanreport
+	printf "\n"
+done;
