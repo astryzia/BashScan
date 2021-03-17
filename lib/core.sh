@@ -14,11 +14,41 @@
 
 valid_timing $TIMING
 
-# Override default /24 scan with a single target specified by user
-if [[ -n "$@" ]] && ! valid_ip "$@"; then
-	usage
-else
+# If a single IP or range of IPs are supplied,
+# check that addresses are valid and assign to 
+# TARGET/TARGETS for later use
+if [[ -n "$@" ]]; then
 	TARGET=$@
+	# If the input doesn't validate as an IP, 
+	# check to see if a range was specified
+	if	! valid_ip "$TARGET"; then
+		# If there isn't a "-" in the input, something else 
+		# is going on; treat as invalid
+		if [[ -n "$(grep -i - <<< $@)" ]]; then
+			IFS='-' read start end <<< $TARGET
+			end=$(echo $start | cut -d"." -f1,2,3).$end
+			# If the beginning and ending IPs specified are 
+			# valid, assign all addresses in range to TARGETS array
+			if valid_ip "$start" && valid_ip "$end"; then	
+				TARGETS=()
+				i=$(echo $start | cut -d"." -f4)
+				end=$(echo $end | cut -d"." -f4)
+				if [ $i -lt $end ]; then
+					while [ $i -le $end ]; do
+						ip=$(echo $start | cut -d"." -f1,2,3).$i
+						TARGETS+=($ip)
+						let i=i+1
+					done
+				else
+					usage
+				fi
+			else
+				usage
+			fi
+		else
+			usage
+		fi
+	fi
 fi
 
 # determine default network interface
@@ -111,8 +141,9 @@ elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list o
 	done
 elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 	IFS='-' read start end <<< $ports
+	# If all ports in specified range are valid, 
+	# populate ports array with the full list
 	isPort $start && isPort $end
-	# this feels kludgy... perhaps a better method exists?
 	ports=()
 	i=$start
 	while [ $i -le $end ]; do

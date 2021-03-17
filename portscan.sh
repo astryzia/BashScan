@@ -18,7 +18,7 @@ Usage:  %s
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
 	[ -T | --timing <0-6> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
-	<x.x.x.x>                 Target IP (optional)\n\n" $PROGNAME
+	<x.x.x.x> OR <x.x.x.x-y>  Target IP (optional)\n\n" $PROGNAME
 	exit 0
 }
 
@@ -47,10 +47,16 @@ pingcheck(){
 
 # Ping multiple hosts
 pingsweep(){
-	for ip in {1..254}; do
-		TARGET="$network.$ip"
-		pingcheck "$TARGET"
-	done;
+	if [ -n "$TARGETS" ]; then
+		for ip in ${TARGETS[@]}; do
+			pingcheck "$ip"
+		done;
+	else
+		for ip in {1..254}; do
+			TARGET="$network.$ip"
+			pingcheck "$TARGET"
+		done;
+	fi
 }
 
 # Get portscan results from array(s) and format in nmap-ish style
@@ -84,7 +90,7 @@ portscan(){
 }
 
 # Single ping for custom target, otherwise sweep
-if [ -n "$TARGET" ]; then
+if [ -n "$TARGET" ] && [ -z "$TARGETS" ]; then
 	LIVEHOSTS=($(pingcheck $TARGET | sort -V | uniq ))
 else
 	LIVEHOSTS=($(pingsweep | sort -V | uniq))
