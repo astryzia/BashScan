@@ -12,6 +12,8 @@ For users with more environmental flexibility, simply clone the repository and e
 
 On more limited systems, the `bashscan.sh` script can be downloaded and ran as a monolithic all-in-one solution. Included in the repository is a script named `unify.sh` that will combine all libraries and functions into the independent `bashscan.sh` script for those who make tweaks and/or port the script elsewhere for use.
 
+`chmod +x *.sh lib/*.sh`
+
 # How to use
 
 **Examples**
@@ -22,6 +24,8 @@ On more limited systems, the `bashscan.sh` script can be downloaded and ran as a
 
 `./run.sh --root --timing 6 --banner -p 22 10.0.0.1`
 
+`./run.sh --root --timing 6 --banner -p 22 10.0.0.1-100`
+
 Alternatively, using the monolithic script
 
 `./bashscan.sh -r -p 22,80,443,3306,3389 -b`
@@ -29,6 +33,8 @@ Alternatively, using the monolithic script
 `./bashscan.sh -r --top-ports 1000 -T 6 -b`
 
 `./bashscan.sh --root --timing 6 --banner -p 22 10.0.0.1`
+
+`./bashscan.sh --root --timing 6 --banner -p 22 10.0.0.1-100`
 
 **Options**
 
