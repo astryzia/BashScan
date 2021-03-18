@@ -11,6 +11,10 @@
 # Determine values in prep for scanning
 ########################################
 
+max_num_processes=$(ulimit -u)
+limiting_factor=4
+num_processes=$((max_num_processes/limiting_factor))
+
 valid_timing $TIMING
 
 # If a single IP or range of IPs are supplied,
