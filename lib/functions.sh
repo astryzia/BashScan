@@ -112,8 +112,6 @@ function ParallelExec {
                 # an improvement would be to generalize the return
                 # for use in parallelizing multiple different inputs
                 if [ "$retval" -eq 0 ]; then
-                	#open="$(echo ${commandsArrayPid[$pid]} | cut -d"/" -f5 | cut -d")" -f1)"
-                	#LIVEPORTS+=("$open")
                 	printf "$(echo ${commandsArrayPid[$pid]} | cut -d"/" -f5 | cut -d")" -f1) "
                 fi
             fi

@@ -118,6 +118,10 @@ isPort(){
 # Determine values in prep for scanning
 ########################################
 
+max_num_processes=$(ulimit -u)
+limiting_factor=4
+num_processes=$((max_num_processes/limiting_factor))
+
 valid_timing $TIMING
 
 # If a single IP or range of IPs are supplied,
@@ -360,16 +364,83 @@ scanreport(){
 
 # Scan ports
 portscan(){
-	LIVEPORTS=()
+	scan=""
 	BANNERS=()
 	for port in ${ports[@]}; do
-		sleep $DELAY
-		(echo >/dev/tcp/$host/$port) >& /dev/null && LIVEPORTS+=($port)
+		# Populate a '#'-delimited string of commands for input into 
+		# ParallelExec function to increase performance
+		scan+="sleep $DELAY; (echo >/dev/tcp/$host/$port) >& /dev/null#"
+		# FIXME: Banner grabbing is still very slow
 		if [ "$BANNER" = true ]; then
 			BANNERS[$port]=$(banners $host $port 2>/dev/null)
 		fi
 	done;
+
+	# Caveat: this function really speeds up the scans, but
+	# it also somewhat breaks the Timing settings. Need more
+	# thought on how best to implement timing in a parallelized 
+	# workload. $num_processes is defined in core.sh, based on 
+	# `ulimit -u` output, which is the max number of processes
+	# a given user can instantiate
+	LIVEPORTS=( $(ParallelExec "$num_processes" "$scan"))
 	count_liveports=${#LIVEPORTS[@]}
+}
+
+########################################
+# Peformance function
+########################################
+
+# Take a list of commands to run, runs them sequentially with numberOfProcesses commands simultaneously runs
+function ParallelExec {
+    local numberOfProcesses="${1}" 	# Number of simultaneous commands to run
+    local commandsArg="${2}" 		# '#' delimited list of commands
+
+    local pid
+    local runningPids=0
+    local counter=0
+    local commandsArray
+    local pidsArray
+    local newPidsArray
+    local retval
+    local pidState
+    local commandsArrayPid
+
+    IFS='#' read -r -a commandsArray <<< "$commandsArg"
+
+    while [ $counter -lt "${#commandsArray[@]}" ] || [ ${#pidsArray[@]} -gt 0 ]; do
+        while [ $counter -lt "${#commandsArray[@]}" ] && [ ${#pidsArray[@]} -lt $numberOfProcesses ]; do
+            eval ${commandsArray[$counter]} &
+            pid=$!
+            pidsArray+=($pid)
+            commandsArrayPid[$pid]="${commandsArray[$counter]}"
+            counter=$((counter+1))
+        done
+
+        newPidsArray=()
+        for pid in "${pidsArray[@]}"; do
+            # Handle uninterruptible sleep state or zombies by ommiting them from running process array (How to kill that is already dead ? :)
+            if kill -0 $pid > /dev/null 2>&1; then
+                pidState=$(ps -p$pid -o state= 2 > /dev/null)
+                if [ "$pidState" != "D" ] && [ "$pidState" != "Z" ]; then
+                    newPidsArray+=($pid)
+                fi
+            else
+                # pid is dead, get it's exit code from wait command
+                wait $pid
+                retval=$?
+                # this is specific to the portscan function input;
+                # an improvement would be to generalize the return
+                # for use in parallelizing multiple different inputs
+                if [ "$retval" -eq 0 ]; then
+                	printf "$(echo ${commandsArrayPid[$pid]} | cut -d"/" -f5 | cut -d")" -f1) "
+                fi
+            fi
+        done
+        pidsArray=("${newPidsArray[@]}")
+
+        # Add a trivial sleep time so bash won't eat all CPU
+        sleep .05
+    done
 }
 
 ########################################
