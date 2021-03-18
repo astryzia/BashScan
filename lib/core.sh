@@ -148,14 +148,16 @@ elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 	# populate ports array with the full list
 	isPort $start && isPort $end
 	ports=()
-	i=$start
-	while [ $i -le $end ]; do
-		ports+=($i)
-		let i=i+1
+	port=$start
+	while [ $port -le $end ]; do
+		ports+=($port)
+		let port=port+1
 	done
 else
 	isPort $ports
 fi
+
+num_ports=${#ports[@]}
 
 # Try grabbing banners
 banners(){

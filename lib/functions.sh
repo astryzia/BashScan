@@ -50,10 +50,6 @@ portscan(){
 		# Populate a '#'-delimited string of commands for input into 
 		# ParallelExec function to increase performance
 		scan+="sleep $DELAY; (echo >/dev/tcp/$host/$port) >& /dev/null#"
-		# FIXME: Banner grabbing is still very slow
-		if [ "$BANNER" = true ]; then
-			BANNERS[$port]=$(banners $host $port 2>/dev/null)
-		fi
 	done;
 
 	# Caveat: this function really speeds up the scans, but
@@ -64,6 +60,14 @@ portscan(){
 	# a given user can instantiate
 	LIVEPORTS=( $(ParallelExec "$num_processes" "$scan"))
 	count_liveports=${#LIVEPORTS[@]}
+
+	# Do this only for live ports to save time
+	# Not currently parallel - consider adding for perf increase
+	if [ "$BANNER" = true ]; then
+		for port in ${LIVEPORTS[@]}; do
+			BANNERS[$port]=$(banners $host $port 2>/dev/null)
+		done;
+	fi
 }
 
 ########################################
@@ -134,12 +138,15 @@ else
 	LIVEHOSTS=($(pingsweep | sort -V | uniq))
 fi
 
-if [ ${#LIVEHOSTS[@]} -ne 0 ]; then
-	count=${#LIVEHOSTS[@]}
-	if [ "$count" -gt 0 ]; then
-		printf "[+] $count hosts found\n[+] Beginning scan of %s total port(s)\n\n" ${#ports[*]}
-		portscan | sort -V | uniq
-	fi
+portstring="ports"
+if [ "$num_ports" == 1 ]; then
+	portstring="port"
+fi
+
+count=${#LIVEHOSTS[@]}
+if [ "$count" -gt 0 ]; then
+	printf "[+] $count hosts found\n[+] Beginning scan of %s total %s\n\n" $num_ports $portstring
+	portscan | sort -V | uniq
 else
 	printf "[+] No responsive hosts found\n\n"
 fi
@@ -148,11 +155,19 @@ for host in ${LIVEHOSTS[@]}; do
 	name=$(revdns $host)
 	portscan $host
 	printf "Scan report for %s (%s):\n" $name $host
-	closed_ports=$((${#ports[@]}-$count_liveports))
-	if [ "$closed_ports" -ne 0 ]; then
-		printf "Not shown: %s closed port(s)\n" $closed_ports
+	closed_ports=$(($num_ports-$count_liveports))
+	if [ "$closed_ports" -lt "$num_ports" ]; then
+		printf "Not shown: %s closed %s\n" $closed_ports $portstring
+		printf "PORT\tSTATE\tSERVICE\n"
+		scanreport
+	else
+		if [ "$num_ports" -gt 1 ]; then
+			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $portstring $name $host
+		else
+			printf "PORT\tSTATE\tSERVICE\n"
+			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1) 
+		fi
 	fi
-	printf "PORT\tSTATE\tSERVICE\n"
-	scanreport
+	
 	printf "\n"
 done;
