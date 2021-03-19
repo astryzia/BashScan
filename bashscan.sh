@@ -18,6 +18,8 @@ Usage:  %s
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
 	[ -T | --timing <0-6> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
+	[ -oN <file.txt> ]        Normal output: similar to interactive output
+	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
 	<x.x.x.x> OR <x.x.x.x-y>  Target IP (optional)\n\n" $PROGNAME
 	exit 0
 }
@@ -30,7 +32,7 @@ Usage:  %s
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
 	-o bhp:rt:T:v \
-	-l banner,help,ports:,root,timing:,top-ports:,version \
+	-l banner,help,oG:,oN:,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -38,20 +40,30 @@ if [ "$VALID_ARGUMENTS" != "0" ]; then
   usage
 fi
 
+# for file output options, we mimic the familiar format of nmap, 
+# using -oG, -oN, etc; note: the "-a" option above allows use of
+# a single dash for "long" options in addition to double dash; 
+# since getopt doesn't support a multi-char "short" option, this 
+# is one workaround. also, the "short" options for output aren't
+# used (no associated chars in the "-o" string above), but getopt 
+# doesn't work if nothing is present in the short fields for the 
+# case statement, so we use placeholders "~" here
 eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
 	case "$1" in
-		-b | --banner) BANNER=true                          ; shift 1 ;;
-		-p | --ports) ports="$2"                            ; shift 2 ;;
-		-t | --top-ports) TOP_PORTS="$2"                    ; shift 2 ;;
-		-T | --timing) TIMING="$2"                          ; shift 2 ;;
-		-r | --root) ROOT_CHECK=false                       ; shift   ;; 
-		-h | --help) usage                                  ; exit 0  ;;
-		-v | --version) echo "$PROGNAME $VERSION"           ; exit 0  ;;
-		--) shift; break;;
+		-b  | --banner      ) BANNER=true               ; shift 1 ;;
+		-~  | --oG			) g_file="$2"				; shift 2 ;; 
+		-~ 	| --oN			) n_file="$2"				; shift 2 ;;
+		-p  | --ports       ) ports="$2"                ; shift 2 ;;
+		-t  | --top-ports   ) TOP_PORTS="$2"            ; shift 2 ;;
+		-T  | --timing      ) TIMING="$2"               ; shift 2 ;;
+		-r  | --root        ) ROOT_CHECK=false          ; shift   ;; 
+		-h  | --help        ) usage                     ; exit 0  ;;
+		-v  | --version     ) echo "$PROGNAME $VERSION"	; exit 0  ;;
+		--                  ) shift; break;;
     	# If invalid options were passed, then getopt should have reported an error,
     	# which we checked as VALID_ARGUMENTS when getopt was called...
-    	*) printf "Unexpected option: %s - this should not happen." $1
+    	*                   ) printf "Unexpected option: %s - this should not happen." $1
 		usage ;;
 	esac
 done
@@ -118,10 +130,15 @@ isPort(){
 # Determine values in prep for scanning
 ########################################
 
+# Find max processes the user can instantiate, 
+# and set a cap for use in parallel execution;
+# `ulimit` should be a bash built-in, so hopefully
+# no need to check that it exist or use alternatives 
 max_num_processes=$(ulimit -u)
 limiting_factor=4
 num_processes=$((max_num_processes/limiting_factor))
 
+# Validate the supplied timing option
 valid_timing $TIMING
 
 # If a single IP or range of IPs are supplied,
@@ -348,22 +365,6 @@ pingsweep(){
 	fi
 }
 
-# Get portscan results from array(s) and format in nmap-ish style
-scanreport(){
-	IFS=$'\n'
-	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
-	unset IFS
-	for port in ${sorted[@]}; do
-		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
-		printf "%s\topen\t%s" $port $service
-		if [ "$BANNER" = true ]; then
-			printf " %s\n" "${BANNERS[$port]}"
-		else
-			printf "\n"
-		fi
-	done;
-}
-
 # Scan ports
 portscan(){
 	scan=""
@@ -390,6 +391,60 @@ portscan(){
 			BANNERS[$port]=$(banners $host $port 2>/dev/null)
 		done;
 	fi
+}
+
+########################################
+# Reporting functions
+########################################
+
+normal_output(){
+	printf "Scan report for %s (%s):\n" $name $host
+	closed_ports=$(($num_ports-$count_liveports))
+	if [ "$closed_ports" -lt "$num_ports" ]; then
+		if [ "$closed_ports" -gt 0 ]; then
+			printf "Not shown: %s closed %s\n" $closed_ports $portstring
+		fi
+		printf "PORT\tSTATE\tSERVICE\n"
+		IFS=$'\n'
+		sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+		unset IFS
+		for port in ${sorted[@]}; do
+			service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+			printf "%s\topen\t%s" $port $service
+			if [ "$BANNER" = true ]; then
+				printf " %s" "${BANNERS[$port]}"
+			fi
+			printf "\n"
+		done;
+	else
+		if [ "$num_ports" -gt 1 ]; then
+			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $portstring $name
+		else
+			printf "PORT\tSTATE\tSERVICE\n"
+			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
+		fi
+	fi
+	
+	printf "\n"
+}
+
+grepable_output(){
+	closed_ports=$(($num_ports-$count_liveports))
+	printf "Host: %s (%s)\t" $name $host
+	printf "Ports:"
+	IFS=$'\n'
+	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+	unset IFS
+	for port in ${sorted[@]}; do
+		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+		printf " %s/open/%s" $port $service
+		# FIXME: Banner reporting needs work
+		#if [ "$BANNER" = true ]; then
+		#	printf "/%s" "${BANNERS[$port]}"
+		#fi
+		printf ","
+	done;
+	printf "\tIgnored State: closed (%s)\n" $closed_ports
 }
 
 ########################################
@@ -476,20 +531,18 @@ fi
 for host in ${LIVEHOSTS[@]}; do
 	name=$(revdns $host)
 	portscan $host
-	printf "Scan report for %s (%s):\n" $name $host
-	closed_ports=$(($num_ports-$count_liveports))
-	if [ "$closed_ports" -lt "$num_ports" ]; then
-		printf "Not shown: %s closed %s\n" $closed_ports $portstring
-		printf "PORT\tSTATE\tSERVICE\n"
-		scanreport
-	else
-		if [ "$num_ports" -gt 1 ]; then
-			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $portstring $name $host
-		else
-			printf "PORT\tSTATE\tSERVICE\n"
-			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1) 
-		fi
+	normal_output # print to stdout
+	# If an output file is specified, also write to that
+	# FIXME: very basic output implementation... need handling for:
+	#		 file already exists - prompt for overwrite?
+	# 		 specified path doesn't exist
+	#		 path exists, but we don't have write permissions
+	if [[ -n "$n_file" ]]; then
+		# FIXME: output assumes tab width of 8 for alignment;
+		#		 expand tabs to spaces for consistent display?
+		normal_output >> $n_file
+	elif [[ -n "$g_file" ]]; then
+		# FIXME: banner reporting in grepable format needs work
+		grepable_output >> $g_file
 	fi
-	
-	printf "\n"
 done;

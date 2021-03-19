@@ -26,22 +26,6 @@ pingsweep(){
 	fi
 }
 
-# Get portscan results from array(s) and format in nmap-ish style
-scanreport(){
-	IFS=$'\n'
-	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
-	unset IFS
-	for port in ${sorted[@]}; do
-		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
-		printf "%s\topen\t%s" $port $service
-		if [ "$BANNER" = true ]; then
-			printf " %s\n" "${BANNERS[$port]}"
-		else
-			printf "\n"
-		fi
-	done;
-}
-
 # Scan ports
 portscan(){
 	scan=""
@@ -68,6 +52,60 @@ portscan(){
 			BANNERS[$port]=$(banners $host $port 2>/dev/null)
 		done;
 	fi
+}
+
+########################################
+# Reporting functions
+########################################
+
+normal_output(){
+	printf "Scan report for %s (%s):\n" $name $host
+	closed_ports=$(($num_ports-$count_liveports))
+	if [ "$closed_ports" -lt "$num_ports" ]; then
+		if [ "$closed_ports" -gt 0 ]; then
+			printf "Not shown: %s closed %s\n" $closed_ports $portstring
+		fi
+		printf "PORT\tSTATE\tSERVICE\n"
+		IFS=$'\n'
+		sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+		unset IFS
+		for port in ${sorted[@]}; do
+			service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+			printf "%s\topen\t%s" $port $service
+			if [ "$BANNER" = true ]; then
+				printf " %s" "${BANNERS[$port]}"
+			fi
+			printf "\n"
+		done;
+	else
+		if [ "$num_ports" -gt 1 ]; then
+			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $portstring $name
+		else
+			printf "PORT\tSTATE\tSERVICE\n"
+			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
+		fi
+	fi
+	
+	printf "\n"
+}
+
+grepable_output(){
+	closed_ports=$(($num_ports-$count_liveports))
+	printf "Host: %s (%s)\t" $name $host
+	printf "Ports:"
+	IFS=$'\n'
+	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+	unset IFS
+	for port in ${sorted[@]}; do
+		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+		printf " %s/open/%s" $port $service
+		# FIXME: Banner reporting needs work
+		#if [ "$BANNER" = true ]; then
+		#	printf "/%s" "${BANNERS[$port]}"
+		#fi
+		printf ","
+	done;
+	printf "\tIgnored State: closed (%s)\n" $closed_ports
 }
 
 ########################################
@@ -154,20 +192,18 @@ fi
 for host in ${LIVEHOSTS[@]}; do
 	name=$(revdns $host)
 	portscan $host
-	printf "Scan report for %s (%s):\n" $name $host
-	closed_ports=$(($num_ports-$count_liveports))
-	if [ "$closed_ports" -lt "$num_ports" ]; then
-		printf "Not shown: %s closed %s\n" $closed_ports $portstring
-		printf "PORT\tSTATE\tSERVICE\n"
-		scanreport
-	else
-		if [ "$num_ports" -gt 1 ]; then
-			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $portstring $name $host
-		else
-			printf "PORT\tSTATE\tSERVICE\n"
-			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1) 
-		fi
+	normal_output # print to stdout
+	# If an output file is specified, also write to that
+	# FIXME: very basic output implementation... need handling for:
+	#		 file already exists - prompt for overwrite?
+	# 		 specified path doesn't exist
+	#		 path exists, but we don't have write permissions
+	if [[ -n "$n_file" ]]; then
+		# FIXME: output assumes tab width of 8 for alignment;
+		#		 expand tabs to spaces for consistent display?
+		normal_output >> $n_file
+	elif [[ -n "$g_file" ]]; then
+		# FIXME: banner reporting in grepable format needs work
+		grepable_output >> $g_file
 	fi
-	
-	printf "\n"
 done;

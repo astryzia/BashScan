@@ -11,10 +11,15 @@
 # Determine values in prep for scanning
 ########################################
 
+# Find max processes the user can instantiate, 
+# and set a cap for use in parallel execution;
+# `ulimit` should be a bash built-in, so hopefully
+# no need to check that it exist or use alternatives 
 max_num_processes=$(ulimit -u)
 limiting_factor=4
 num_processes=$((max_num_processes/limiting_factor))
 
+# Validate the supplied timing option
 valid_timing $TIMING
 
 # If a single IP or range of IPs are supplied,
