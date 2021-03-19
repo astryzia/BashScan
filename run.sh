@@ -28,3 +28,5 @@ Usage:  %s
 . lib/validations.sh
 . lib/core.sh
 . lib/functions.sh
+
+main

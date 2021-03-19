@@ -25,6 +25,7 @@ Usage:  %s
 }
 
 
+
 ########################################
 # Argument handling
 ########################################
@@ -246,15 +247,6 @@ if ! valid_ip response; then
 	fi
 fi
 
-printf "\nLocal IP:\t\t%s\n" $localip
-printf "Netmask:\t\t%s\n" $iprange
-printf "External IP:\t\t%s\n" $getip
-printf "Default Interface:\t%s\n" $default_interface
-
-if [ -n "$TARGET" ]; then
-	printf "Target:\t\t\t%s\n" $TARGET
-fi
-
 # Port list
 # Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
 # Custom:  User input from "-p | --ports" flags, either as a comma-separated list or a range
@@ -318,7 +310,7 @@ revdns(){
 # Determine which pingsweep method(s) will be used
 if test $(which arping); then
 	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
-		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+		arp_warning=true
 		SWEEP_METHOD="ICMP"
 	else
 		SWEEP_METHOD="ICMP/ARP"
@@ -326,7 +318,6 @@ if test $(which arping); then
 else
 	SWEEP_METHOD="ICMP"
 fi
-printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
 
 # Timing options (initially based on nmap Maximum TCP scan delay settings)
 # nmap values are in milliseconds - converted here for bash sleep in seconds
@@ -339,7 +330,6 @@ case $TIMING in
 	5 )	DELAY=.005   ;;
 	6 )	DELAY=0      ;;
 esac
-
 ########################################
 # Scanning functions
 ########################################
@@ -404,7 +394,7 @@ normal_output(){
 	closed_ports=$(($num_ports-$count_liveports))
 	if [ "$closed_ports" -lt "$num_ports" ]; then
 		if [ "$closed_ports" -gt 0 ]; then
-			printf "Not shown: %s closed %s\n" $closed_ports $portstring
+			printf "Not shown: %s closed %s\n" $closed_ports $(plural $closed_ports port)
 		fi
 		printf "PORT\tSTATE\tSERVICE\n"
 		IFS=$'\n'
@@ -420,7 +410,7 @@ normal_output(){
 		done;
 	else
 		if [ "$num_ports" -gt 1 ]; then
-			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $portstring $name
+			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $(plural $num_ports port) $name $host
 		else
 			printf "PORT\tSTATE\tSERVICE\n"
 			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
@@ -447,6 +437,17 @@ grepable_output(){
 		printf ","
 	done;
 	printf "\tIgnored State: closed (%s)\n" $closed_ports
+}
+
+# Handle purality of strings in reporting
+plural(){
+	num=$1
+	text=$2
+	if [ "$num" == 1 ]; then
+		printf "%s" $text
+	else
+		printf "%ss" $text
+	fi
 }
 
 ########################################
@@ -510,41 +511,56 @@ function ParallelExec {
 # Main function
 ########################################
 
-# Single ping for custom target, otherwise sweep
-if [ -n "$TARGET" ] && [ -z "$TARGETS" ]; then
-	LIVEHOSTS=($(pingcheck $TARGET | sort -V | uniq ))
-else
-	LIVEHOSTS=($(pingsweep | sort -V | uniq))
-fi
+main(){
+	printf "\nLocal IP:\t\t%s\n" $localip
+	printf "Netmask:\t\t%s\n" $iprange
+	printf "External IP:\t\t%s\n" $getip
+	printf "Default Interface:\t%s\n" $default_interface
 
-portstring="ports"
-if [ "$num_ports" == 1 ]; then
-	portstring="port"
-fi
-
-count=${#LIVEHOSTS[@]}
-if [ "$count" -gt 0 ]; then
-	printf "[+] $count hosts found\n[+] Beginning scan of %s total %s\n\n" $num_ports $portstring
-	portscan | sort -V | uniq
-else
-	printf "[+] No responsive hosts found\n\n"
-fi
-
-for host in ${LIVEHOSTS[@]}; do
-	name=$(revdns $host)
-	portscan $host
-	normal_output # print to stdout
-	# If an output file is specified, also write to that
-	# FIXME: very basic output implementation... need handling for:
-	#		 file already exists - prompt for overwrite?
-	# 		 specified path doesn't exist
-	#		 path exists, but we don't have write permissions
-	if [[ -n "$n_file" ]]; then
-		# FIXME: output assumes tab width of 8 for alignment;
-		#		 expand tabs to spaces for consistent display?
-		normal_output >> $n_file
-	elif [[ -n "$g_file" ]]; then
-		# FIXME: banner reporting in grepable format needs work
-		grepable_output >> $g_file
+	if [ -n "$TARGET" ]; then
+		printf "Target:\t\t\t%s\n" $TARGET
 	fi
-done;
+
+	if [ "$arp_warning" = true ]; then
+		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+	fi
+
+	printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
+
+	# Single ping for custom target, otherwise sweep
+	if [ -n "$TARGET" ] && [ -z "$TARGETS" ]; then
+		LIVEHOSTS=($(pingcheck $TARGET | sort -V | uniq ))
+	else
+		LIVEHOSTS=($(pingsweep | sort -V | uniq))
+	fi
+
+	num_hosts=${#LIVEHOSTS[@]}
+
+	if [ "$num_hosts" -gt 0 ]; then
+		printf "[+] $num_hosts %s found\n[+] Beginning scan of %s total %s\n\n" $(plural $num_hosts host) $num_ports $(plural $num_ports port)
+		portscan | sort -V | uniq
+	else
+		printf "[+] No responsive hosts found\n\n"
+	fi
+
+	for host in ${LIVEHOSTS[@]}; do
+		name=$(revdns $host)
+		portscan $host
+		normal_output # print to stdout
+		# If an output file is specified, also write to that
+		# FIXME: very basic output implementation... need handling for:
+		#		 file already exists - prompt for overwrite?
+		# 		 specified path doesn't exist
+		#		 path exists, but we don't have write permissions
+		if [[ -n "$n_file" ]]; then
+			# FIXME: output assumes tab width of 8 for alignment;
+			#		 expand tabs to spaces for consistent display?
+			normal_output >> $n_file
+		elif [[ -n "$g_file" ]]; then
+			# FIXME: banner reporting in grepable format needs work
+			grepable_output >> $g_file
+		fi
+	done;
+}
+
+main

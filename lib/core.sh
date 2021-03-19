@@ -125,15 +125,6 @@ if ! valid_ip response; then
 	fi
 fi
 
-printf "\nLocal IP:\t\t%s\n" $localip
-printf "Netmask:\t\t%s\n" $iprange
-printf "External IP:\t\t%s\n" $getip
-printf "Default Interface:\t%s\n" $default_interface
-
-if [ -n "$TARGET" ]; then
-	printf "Target:\t\t\t%s\n" $TARGET
-fi
-
 # Port list
 # Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
 # Custom:  User input from "-p | --ports" flags, either as a comma-separated list or a range
@@ -197,7 +188,7 @@ revdns(){
 # Determine which pingsweep method(s) will be used
 if test $(which arping); then
 	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
-		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+		arp_warning=true
 		SWEEP_METHOD="ICMP"
 	else
 		SWEEP_METHOD="ICMP/ARP"
@@ -205,7 +196,6 @@ if test $(which arping); then
 else
 	SWEEP_METHOD="ICMP"
 fi
-printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
 
 # Timing options (initially based on nmap Maximum TCP scan delay settings)
 # nmap values are in milliseconds - converted here for bash sleep in seconds
