@@ -16,7 +16,7 @@
 # `ulimit` should be a bash built-in, so hopefully
 # no need to check that it exist or use alternatives 
 max_num_processes=$(ulimit -u)
-limiting_factor=4
+limiting_factor=4 # this is somewhat arbitrary, but seems to work fine
 num_processes=$((max_num_processes/limiting_factor))
 
 # Validate the supplied timing option
@@ -148,16 +148,16 @@ elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list o
 		isPort $port
 	done
 elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
-	IFS='-' read start end <<< $ports
-	# If all ports in specified range are valid, 
-	# populate ports array with the full list
-	isPort $start && isPort $end
-	ports=()
-	port=$start
-	while [ $port -le $end ]; do
-		ports+=($port)
-		let port=port+1
-	done
+	# Treat "-p-" case as a request for all ports
+	if [[ "$ports" == "-" ]]; then
+		ports=( $(seq 0 65535) )
+	else
+		IFS='-' read start end <<< $ports
+		# If all ports in specified range are valid, 
+		# populate ports array with the full list
+		isPort $start && isPort $end
+		ports=( $(seq $start $end ))
+	fi
 else
 	isPort $ports
 fi
