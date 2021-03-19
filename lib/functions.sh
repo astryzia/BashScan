@@ -63,7 +63,7 @@ normal_output(){
 	closed_ports=$(($num_ports-$count_liveports))
 	if [ "$closed_ports" -lt "$num_ports" ]; then
 		if [ "$closed_ports" -gt 0 ]; then
-			printf "Not shown: %s closed %s\n" $closed_ports $portstring
+			printf "Not shown: %s closed %s\n" $closed_ports $(plural $closed_ports port)
 		fi
 		printf "PORT\tSTATE\tSERVICE\n"
 		IFS=$'\n'
@@ -79,7 +79,7 @@ normal_output(){
 		done;
 	else
 		if [ "$num_ports" -gt 1 ]; then
-			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $portstring $name
+			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $(plural $num_ports port) $name
 		else
 			printf "PORT\tSTATE\tSERVICE\n"
 			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
@@ -106,6 +106,17 @@ grepable_output(){
 		printf ","
 	done;
 	printf "\tIgnored State: closed (%s)\n" $closed_ports
+}
+
+# Handle purality of strings in reporting
+plural(){
+	num=$1
+	text=$2
+	if [ "$num" == 1 ]; then
+		printf "%s" $text
+	else
+		printf "%ss" $text
+	fi
 }
 
 ########################################
@@ -176,14 +187,9 @@ else
 	LIVEHOSTS=($(pingsweep | sort -V | uniq))
 fi
 
-portstring="ports"
-if [ "$num_ports" == 1 ]; then
-	portstring="port"
-fi
-
-count=${#LIVEHOSTS[@]}
-if [ "$count" -gt 0 ]; then
-	printf "[+] $count hosts found\n[+] Beginning scan of %s total %s\n\n" $num_ports $portstring
+num_hosts=${#LIVEHOSTS[@]}
+if [ "$num_hosts" -gt 0 ]; then
+	printf "[+] $num_hosts %s found\n[+] Beginning scan of %s total %s\n\n" $(plural $num_hosts host) $num_ports $(plural $num_ports port)
 	portscan | sort -V | uniq
 else
 	printf "[+] No responsive hosts found\n\n"
