@@ -3,13 +3,27 @@
 # Scanning functions
 ########################################
 
+# Try grabbing banners
+banners(){
+	host="$1"
+	port="$2"
+	# Trimmed out all but first line of response to clean up long http replies
+	# Also removed trailing \r which is common in http responses
+	banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo "">&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
+	if ! [ "$banner" = "" ]; then 
+		echo "| "$banner 2>/dev/null
+	fi
+}
+
 # Check single TARGET for response before port scanning
 pingcheck(){
 	TARGET=$1
 	if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
 		arping -c 1 -w 1 -I $default_interface $TARGET 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
 	fi
-	ping -c 1 -W 1 $TARGET | tr \\n " " | awk '/1 received/ {print $2}' &
+	# Added stderr redirection to catch ping warning for broadcast address
+	# Adding "-b" would enable pinging broadcast, but I doubt that's what we want
+	ping -c 1 -W 1 $TARGET 2>/dev/null | tr \\n " " | awk '/1 received/ {print $2}' &
 }
 
 # Ping multiple hosts
@@ -58,6 +72,25 @@ portscan(){
 # Reporting functions
 ########################################
 
+grepable_output(){
+	closed_ports=$(($num_ports-$count_liveports))
+	printf "Host: %s (%s)\t" $name $host
+	printf "Ports:"
+	IFS=$'\n'
+	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+	unset IFS
+	for port in ${sorted[@]}; do
+		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+		printf " %s/open/%s" $port $service
+		# FIXME: Banner reporting needs work
+		#if [ "$BANNER" = true ]; then
+		#	printf "/%s" "${BANNERS[$port]}"
+		#fi
+		printf ","
+	done;
+	printf "\tIgnored State: closed (%s)\n" $closed_ports
+}
+
 normal_output(){
 	printf "Scan report for %s (%s):\n" $name $host
 	closed_ports=$(($num_ports-$count_liveports))
@@ -89,25 +122,6 @@ normal_output(){
 	printf "\n"
 }
 
-grepable_output(){
-	closed_ports=$(($num_ports-$count_liveports))
-	printf "Host: %s (%s)\t" $name $host
-	printf "Ports:"
-	IFS=$'\n'
-	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
-	unset IFS
-	for port in ${sorted[@]}; do
-		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
-		printf " %s/open/%s" $port $service
-		# FIXME: Banner reporting needs work
-		#if [ "$BANNER" = true ]; then
-		#	printf "/%s" "${BANNERS[$port]}"
-		#fi
-		printf ","
-	done;
-	printf "\tIgnored State: closed (%s)\n" $closed_ports
-}
-
 # Handle purality of strings in reporting
 plural(){
 	num=$1
@@ -116,6 +130,24 @@ plural(){
 		printf "%s" $text
 	else
 		printf "%ss" $text
+	fi
+}
+
+# Attempt reverse DNS resolution of target addresses
+revdns(){
+	ip=$1
+	if test $(which dig); then
+		name=$(dig +short +answer -x $ip | sed 's/.$//')
+	elif test $(which nslookup); then
+		name=$(nslookup $ip | cut -d$'\n' -f1 | grep -o '[^ ]*$' | sed 's/.$//')
+	elif test $(which host); then
+		name=$(host $ip | grep -o '[^ ]*$' | sed 's/.$//')
+	fi
+
+	if [ -n "$name" ]; then
+		printf $name 2>/dev/null
+	else
+		printf "NXDOMAIN"
 	fi
 }
 

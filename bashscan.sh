@@ -28,7 +28,7 @@ Usage:  %s
 	[ -v | --version ]        Print version and exit.
 	[ -oN <file.txt> ]        Normal output: similar to interactive output
 	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
-	<x.x.x.x> OR <x.x.x.x-y>  Target IP (optional)\n\n" $PROGNAME
+	<x.x.x.[x|x-y|x/24]> ]    Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
 
@@ -151,6 +151,27 @@ num_processes=$((max_num_processes/limiting_factor))
 # Validate the supplied timing option
 valid_timing $TIMING
 
+# Takes as input IP + CIDR (ex: 192.168.1.0/24)
+# Converts CIDR to list of IPs
+# Limited to /8 max 
+function cidr_to_ip {
+	local base=${1%/*}
+	local masksize=${1#*/}
+
+	local mask=$(( 0xFFFFFFFF << (32 - $masksize) ))
+
+	[ $masksize -lt 8 ] && { echo "Max range is /8."; exit 1;}
+	IFS=. read a b c d <<< $base
+
+	local ip=$(( ($b << 16) + ($c << 8) + $d ))
+	local ipstart=$(( $ip & $mask ))
+	local ipend=$(( ($ipstart | ~$mask ) & 0x7FFFFFFF ))
+
+	seq $ipstart $ipend | while read i; do
+    	printf "$a.$(( ($i & 0xFF0000) >> 16 )).$(( ($i & 0xFF00) >> 8 )).$(( $i & 0x00FF )) "
+	done 
+}
+
 # If a single IP or range of IPs are supplied,
 # check that addresses are valid and assign to 
 # TARGET/TARGETS for later use
@@ -159,9 +180,10 @@ if [[ -n "$@" ]]; then
 	# If the input doesn't validate as an IP, 
 	# check to see if a range was specified
 	if	! valid_ip "$TARGET"; then
-		# If there isn't a "-" in the input, something else 
-		# is going on; treat as invalid
-		if [[ -n "$(grep -i - <<< $@)" ]]; then
+		# If there is a "-" in input, treat as IP range
+		# FIXME: currently only handles 4th octet;
+		#        add support for ranges in all 4 octets
+		if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
 			IFS='-' read start end <<< $TARGET
 			end=$(echo $start | cut -d"." -f1,2,3).$end
 			# If the beginning and ending IPs specified are 
@@ -182,6 +204,16 @@ if [[ -n "$@" ]]; then
 			else
 				usage
 			fi
+		# If there is a "/" in the input, treat as CIDR
+		elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
+			# Sanity check base IP specified is valid
+			if ! valid_ip "${TARGET%/*}"; then
+				usage
+			else
+				TARGETS=("$(cidr_to_ip $TARGET)")
+			fi
+		# If there isn't a "-" or "/" in the input, something else 
+		# is going on; treat as invalid
 		else
 			usage
 		fi
@@ -284,36 +316,6 @@ fi
 
 num_ports=${#ports[@]}
 
-# Try grabbing banners
-banners(){
-	host="$1"
-	port="$2"
-	# Trimmed out all but first line of response to clean up long http replies
-	# Also removed trailing \r which is common in http responses
-	banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo "">&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
-	if ! [ "$banner" = "" ]; then 
-		echo "| "$banner 2>/dev/null
-	fi
-}
-
-# Attempt reverse DNS resolution of target addresses
-revdns(){
-	ip=$1
-	if test $(which dig); then
-		name=$(dig +short +answer -x $ip | sed 's/.$//')
-	elif test $(which nslookup); then
-		name=$(nslookup $ip | cut -d$'\n' -f1 | grep -o '[^ ]*$' | sed 's/.$//')
-	elif test $(which host); then
-		name=$(host $ip | grep -o '[^ ]*$' | sed 's/.$//')
-	fi
-
-	if [ -n "$name" ]; then
-		printf $name 2>/dev/null
-	else
-		printf "NXDOMAIN"
-	fi
-}
-
 # Determine which pingsweep method(s) will be used
 if test $(which arping); then
 	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
@@ -336,10 +338,21 @@ case $TIMING in
 	4 )	DELAY=.010   ;;
 	5 )	DELAY=.005   ;;
 	6 )	DELAY=0      ;;
-esac
-########################################
+esac########################################
 # Scanning functions
 ########################################
+
+# Try grabbing banners
+banners(){
+	host="$1"
+	port="$2"
+	# Trimmed out all but first line of response to clean up long http replies
+	# Also removed trailing \r which is common in http responses
+	banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo "">&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
+	if ! [ "$banner" = "" ]; then 
+		echo "| "$banner 2>/dev/null
+	fi
+}
 
 # Check single TARGET for response before port scanning
 pingcheck(){
@@ -347,7 +360,9 @@ pingcheck(){
 	if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
 		arping -c 1 -w 1 -I $default_interface $TARGET 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
 	fi
-	ping -c 1 -W 1 $TARGET | tr \\n " " | awk '/1 received/ {print $2}' &
+	# Added stderr redirection to catch ping warning for broadcast address
+	# Adding "-b" would enable pinging broadcast, but I doubt that's what we want
+	ping -c 1 -W 1 $TARGET 2>/dev/null | tr \\n " " | awk '/1 received/ {print $2}' &
 }
 
 # Ping multiple hosts
@@ -396,6 +411,25 @@ portscan(){
 # Reporting functions
 ########################################
 
+grepable_output(){
+	closed_ports=$(($num_ports-$count_liveports))
+	printf "Host: %s (%s)\t" $name $host
+	printf "Ports:"
+	IFS=$'\n'
+	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
+	unset IFS
+	for port in ${sorted[@]}; do
+		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+		printf " %s/open/%s" $port $service
+		# FIXME: Banner reporting needs work
+		#if [ "$BANNER" = true ]; then
+		#	printf "/%s" "${BANNERS[$port]}"
+		#fi
+		printf ","
+	done;
+	printf "\tIgnored State: closed (%s)\n" $closed_ports
+}
+
 normal_output(){
 	printf "Scan report for %s (%s):\n" $name $host
 	closed_ports=$(($num_ports-$count_liveports))
@@ -427,25 +461,6 @@ normal_output(){
 	printf "\n"
 }
 
-grepable_output(){
-	closed_ports=$(($num_ports-$count_liveports))
-	printf "Host: %s (%s)\t" $name $host
-	printf "Ports:"
-	IFS=$'\n'
-	sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
-	unset IFS
-	for port in ${sorted[@]}; do
-		service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
-		printf " %s/open/%s" $port $service
-		# FIXME: Banner reporting needs work
-		#if [ "$BANNER" = true ]; then
-		#	printf "/%s" "${BANNERS[$port]}"
-		#fi
-		printf ","
-	done;
-	printf "\tIgnored State: closed (%s)\n" $closed_ports
-}
-
 # Handle purality of strings in reporting
 plural(){
 	num=$1
@@ -454,6 +469,24 @@ plural(){
 		printf "%s" $text
 	else
 		printf "%ss" $text
+	fi
+}
+
+# Attempt reverse DNS resolution of target addresses
+revdns(){
+	ip=$1
+	if test $(which dig); then
+		name=$(dig +short +answer -x $ip | sed 's/.$//')
+	elif test $(which nslookup); then
+		name=$(nslookup $ip | cut -d$'\n' -f1 | grep -o '[^ ]*$' | sed 's/.$//')
+	elif test $(which host); then
+		name=$(host $ip | grep -o '[^ ]*$' | sed 's/.$//')
+	fi
+
+	if [ -n "$name" ]; then
+		printf $name 2>/dev/null
+	else
+		printf "NXDOMAIN"
 	fi
 }
 

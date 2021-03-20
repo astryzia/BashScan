@@ -28,7 +28,7 @@ Usage:  %s
 	[ -v | --version ]        Print version and exit.
 	[ -oN <file.txt> ]        Normal output: similar to interactive output
 	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
-	<x.x.x.x> OR <x.x.x.x-y>  Target IP (optional)\n\n" $PROGNAME
+	<x.x.x.[x|x-y|x/24]> ]    Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
 
