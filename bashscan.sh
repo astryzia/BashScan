@@ -1,7 +1,15 @@
 #!/bin/bash
 
+# Capture script invocation for use in file output
+invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
+START=$(date +%s%N)
+start_stdout=$(date --date @"$(( $START / 1000000000 ))" "+%Y-%m-%d %H:%M:%S %Z")
+
 readonly PROGNAME='BashScan'
 readonly VERSION='0.0.6'
+readonly URL='https://github.com/astryzia/BashScan'
+
+printf "Starting %s %s ( %s ) at %s\n" "$PROGNAME" "$VERSION" "$URL" "$start_stdout"
 
 ########################################
 # help/usage 
@@ -111,7 +119,7 @@ valid_timing(){
 
 # Validate port inputs:
 # Redirects to usage if port value is either not an integer or outside of 1-65535 range
-isPort(){
+valid_port(){
     # validates integer
 	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
 		usage
@@ -120,7 +128,6 @@ isPort(){
 		usage
 	fi
 }
-
 ########################################
 # Default values for the script options
 ########################################
@@ -258,7 +265,7 @@ if [ -z "$ports" ]; then
 elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list of ports? 
 	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
 	for port in ${ports[@]}; do
-		isPort $port
+		valid_port $port
 	done
 elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 	# Treat "-p-" case as a request for all ports
@@ -268,11 +275,11 @@ elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 		IFS='-' read start end <<< $ports
 		# If all ports in specified range are valid, 
 		# populate ports array with the full list
-		isPort $start && isPort $end
+		valid_port $start && valid_port $end
 		ports=( $(seq $start $end ))
 	fi
 else
-	isPort $ports
+	valid_port $ports
 fi
 
 num_ports=${#ports[@]}
@@ -543,6 +550,16 @@ main(){
 		printf "[+] No responsive hosts found\n\n"
 	fi
 
+	datestart_file=$(date --date @"$(( $START / 1000000000 ))" "+%c")
+	file_header="$(printf "%s %s scan initiated %s as: %s" $PROGNAME $VERSION "$datestart_file" "$invoked")"
+
+	# File header
+	if [[ -n "$n_file" ]]; then
+		printf "# %s\n" "$file_header" >> $n_file
+	elif [[ -n "$g_file" ]]; then
+		printf "# %s\n" "$file_header" >> $g_file
+	fi
+
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
 		portscan $host
@@ -561,6 +578,22 @@ main(){
 			grepable_output >> $g_file
 		fi
 	done;
+
+	TZ=$(date +%Z)
+	END=$(date +%s%N)
+	runtime=$(( $END - $START ))
+	# inconsistent results when timezone is not specified
+	runtime_stdout=$(TZ=$TZ date -d @"$(( runtime / 1000000000 ))" +%T)
+	end_file=$(date -d @"$(( $END / 1000000000 ))" +%c)
+
+	printf "%s done: %s %s scanned in %s\n" $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
+	
+	# File footer
+	if [[ -n "$n_file" ]]; then
+		printf "# %s done at %s -- %s %s scanned in %s" $PROGNAME "$end_file" $num_hosts $(plural $num_hosts host) "$runtime_stdout" >> $n_file
+	elif [[ -n "$g_file" ]]; then
+		printf "# %s done at %s -- %s %s scanned in %s" $PROGNAME "$end_file" $num_hosts $(plural $num_hosts host) "$runtime_stdout" >> $g_file
+	fi
 }
 
 main

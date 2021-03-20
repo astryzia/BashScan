@@ -1,7 +1,15 @@
 #!/bin/bash
 
+# Capture script invocation for use in file output
+invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
+START=$(date +%s%N)
+start_stdout=$(date --date @"$(( $START / 1000000000 ))" "+%Y-%m-%d %H:%M:%S %Z")
+
 readonly PROGNAME='BashScan'
 readonly VERSION='0.0.6'
+readonly URL='https://github.com/astryzia/BashScan'
+
+printf "Starting %s %s ( %s ) at %s\n" "$PROGNAME" "$VERSION" "$URL" "$start_stdout"
 
 ########################################
 # help/usage 

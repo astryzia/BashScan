@@ -1,4 +1,3 @@
-
 ########################################
 # Default values for the script options
 ########################################
@@ -136,7 +135,7 @@ if [ -z "$ports" ]; then
 elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list of ports? 
 	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
 	for port in ${ports[@]}; do
-		isPort $port
+		valid_port $port
 	done
 elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 	# Treat "-p-" case as a request for all ports
@@ -146,11 +145,11 @@ elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 		IFS='-' read start end <<< $ports
 		# If all ports in specified range are valid, 
 		# populate ports array with the full list
-		isPort $start && isPort $end
+		valid_port $start && valid_port $end
 		ports=( $(seq $start $end ))
 	fi
 else
-	isPort $ports
+	valid_port $ports
 fi
 
 num_ports=${#ports[@]}

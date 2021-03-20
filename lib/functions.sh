@@ -212,6 +212,16 @@ main(){
 		printf "[+] No responsive hosts found\n\n"
 	fi
 
+	datestart_file=$(date --date @"$(( $START / 1000000000 ))" "+%c")
+	file_header="$(printf "%s %s scan initiated %s as: %s" $PROGNAME $VERSION "$datestart_file" "$invoked")"
+
+	# File header
+	if [[ -n "$n_file" ]]; then
+		printf "# %s\n" "$file_header" >> $n_file
+	elif [[ -n "$g_file" ]]; then
+		printf "# %s\n" "$file_header" >> $g_file
+	fi
+
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
 		portscan $host
@@ -230,4 +240,20 @@ main(){
 			grepable_output >> $g_file
 		fi
 	done;
+
+	TZ=$(date +%Z)
+	END=$(date +%s%N)
+	runtime=$(( $END - $START ))
+	# inconsistent results when timezone is not specified
+	runtime_stdout=$(TZ=$TZ date -d @"$(( runtime / 1000000000 ))" +%T)
+	end_file=$(date -d @"$(( $END / 1000000000 ))" +%c)
+
+	printf "%s done: %s %s scanned in %s\n" $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
+	
+	# File footer
+	if [[ -n "$n_file" ]]; then
+		printf "# %s done at %s -- %s %s scanned in %s" $PROGNAME "$end_file" $num_hosts $(plural $num_hosts host) "$runtime_stdout" >> $n_file
+	elif [[ -n "$g_file" ]]; then
+		printf "# %s done at %s -- %s %s scanned in %s" $PROGNAME "$end_file" $num_hosts $(plural $num_hosts host) "$runtime_stdout" >> $g_file
+	fi
 }

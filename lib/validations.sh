@@ -41,7 +41,7 @@ valid_timing(){
 
 # Validate port inputs:
 # Redirects to usage if port value is either not an integer or outside of 1-65535 range
-isPort(){
+valid_port(){
     # validates integer
 	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
 		usage
