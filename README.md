@@ -1,3 +1,12 @@
+<h1 align=center>
+  <img src="https://i.imgur.com/VDwBdNH.png" alt="BashScan">
+  <br/>
+</h1>
+
+[![License](https://img.shields.io/badge/license-MIT-_red.svg)](https://opensource.org/licenses/MIT)
+[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/astryzia/BashScan/issues)
+[![Follow on Twitter](https://img.shields.io/twitter/follow/astryzia.svg?logo=twitter)](https://twitter.com/astryzia)
+
 # BashScan
 
 BashScan is a port scanner built to utilize /dev/tcp for network and service discovery on systems that have limitations or are otherwise unable to use alternative scanning solutions such as nmap.
