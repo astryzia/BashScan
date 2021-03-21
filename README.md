@@ -5,7 +5,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-_red.svg)](https://opensource.org/licenses/MIT)
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/astryzia/BashScan/issues)
-[![Follow on Twitter](https://img.shields.io/twitter/follow/astryzia.svg?logo=twitter)](https://twitter.com/astryzia)
+[![Follow on Twitter](https://img.shields.io/twitter/follow/astryzia.svg?logo=twitter)](https://twitter.com/0xValkyrie)
 
 # BashScan
 
