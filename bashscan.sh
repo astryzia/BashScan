@@ -2,8 +2,8 @@
 
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
-START=$(date +%s%N)
-start_stdout=$(date --date @"$(( $START / 1000000000 ))" "+%Y-%m-%d %H:%M:%S %Z")
+START=$(date +%s%3N)
+start_stdout=$(date --date @"$(( $START / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
 
 readonly PROGNAME='BashScan'
 readonly VERSION='0.0.6'
@@ -28,7 +28,7 @@ Usage:  %s
 	[ -v | --version ]        Print version and exit.
 	[ -oN <file.txt> ]        Normal output: similar to interactive output
 	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
-	<x.x.x.[x|x-y|x/24]> ]    Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
+	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
 
@@ -90,8 +90,7 @@ done
 #   OR
 #      if valid_ip IP_ADDRESS; then echo good; else echo bad; fi
 #
-valid_ip()
-{
+valid_ip(){
     local  ip=$1
     local  stat=1
 
@@ -154,7 +153,7 @@ valid_timing $TIMING
 # Takes as input IP + CIDR (ex: 192.168.1.0/24)
 # Converts CIDR to list of IPs
 # Limited to /8 max 
-function cidr_to_ip {
+cidr_to_ip() {
 	local base=${1%/*}
 	local masksize=${1#*/}
 
@@ -338,7 +337,8 @@ case $TIMING in
 	4 )	DELAY=.010   ;;
 	5 )	DELAY=.005   ;;
 	6 )	DELAY=0      ;;
-esac########################################
+esac
+########################################
 # Scanning functions
 ########################################
 
@@ -495,7 +495,7 @@ revdns(){
 ########################################
 
 # Take a list of commands to run, runs them sequentially with numberOfProcesses commands simultaneously runs
-function ParallelExec {
+ParallelExec() {
     local numberOfProcesses="${1}" 	# Number of simultaneous commands to run
     local commandsArg="${2}" 		# '#' delimited list of commands
 
@@ -583,7 +583,7 @@ main(){
 		printf "[+] No responsive hosts found\n\n"
 	fi
 
-	datestart_file=$(date --date @"$(( $START / 1000000000 ))" "+%c")
+	datestart_file=$(date --date @"$(( $START / 1000 ))" "+%c")
 	file_header="$(printf "%s %s scan initiated %s as: %s" $PROGNAME $VERSION "$datestart_file" "$invoked")"
 
 	# File header
@@ -613,11 +613,11 @@ main(){
 	done;
 
 	TZ=$(date +%Z)
-	END=$(date +%s%N)
-	runtime=$(( $END - $START ))
+	END=$(date +%s%3N)
+	runtime=$( echo "scale=3; ((($END - $START))/1000)" | bc )
 	# inconsistent results when timezone is not specified
-	runtime_stdout=$(TZ=$TZ date -d @"$(( runtime / 1000000000 ))" +%T)
-	end_file=$(date -d @"$(( $END / 1000000000 ))" +%c)
+	runtime_stdout=$(TZ=$TZ date -d @"$runtime" +%H:%M:%S.%3N)
+	end_file=$(date -d @"$(( $END / 1000 ))" +%c)
 
 	printf "%s done: %s %s scanned in %s\n" $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
 	

@@ -12,8 +12,7 @@
 #   OR
 #      if valid_ip IP_ADDRESS; then echo good; else echo bad; fi
 #
-valid_ip()
-{
+valid_ip(){
     local  ip=$1
     local  stat=1
 

@@ -2,8 +2,8 @@
 
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
-START=$(date +%s%N)
-start_stdout=$(date --date @"$(( $START / 1000000000 ))" "+%Y-%m-%d %H:%M:%S %Z")
+START=$(date +%s%3N)
+start_stdout=$(date --date @"$(( $START / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
 
 readonly PROGNAME='BashScan'
 readonly VERSION='0.0.6'
@@ -28,7 +28,7 @@ Usage:  %s
 	[ -v | --version ]        Print version and exit.
 	[ -oN <file.txt> ]        Normal output: similar to interactive output
 	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
-	<x.x.x.[x|x-y|x/24]> ]    Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
+	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
 

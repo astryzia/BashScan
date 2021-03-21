@@ -156,7 +156,7 @@ revdns(){
 ########################################
 
 # Take a list of commands to run, runs them sequentially with numberOfProcesses commands simultaneously runs
-function ParallelExec {
+ParallelExec() {
     local numberOfProcesses="${1}" 	# Number of simultaneous commands to run
     local commandsArg="${2}" 		# '#' delimited list of commands
 
@@ -244,7 +244,7 @@ main(){
 		printf "[+] No responsive hosts found\n\n"
 	fi
 
-	datestart_file=$(date --date @"$(( $START / 1000000000 ))" "+%c")
+	datestart_file=$(date --date @"$(( $START / 1000 ))" "+%c")
 	file_header="$(printf "%s %s scan initiated %s as: %s" $PROGNAME $VERSION "$datestart_file" "$invoked")"
 
 	# File header
@@ -274,11 +274,11 @@ main(){
 	done;
 
 	TZ=$(date +%Z)
-	END=$(date +%s%N)
-	runtime=$(( $END - $START ))
+	END=$(date +%s%3N)
+	runtime=$( echo "scale=3; ((($END - $START))/1000)" | bc )
 	# inconsistent results when timezone is not specified
-	runtime_stdout=$(TZ=$TZ date -d @"$(( runtime / 1000000000 ))" +%T)
-	end_file=$(date -d @"$(( $END / 1000000000 ))" +%c)
+	runtime_stdout=$(TZ=$TZ date -d @"$runtime" +%H:%M:%S.%3N)
+	end_file=$(date -d @"$(( $END / 1000 ))" +%c)
 
 	printf "%s done: %s %s scanned in %s\n" $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
 	

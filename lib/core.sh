@@ -24,7 +24,7 @@ valid_timing $TIMING
 # Takes as input IP + CIDR (ex: 192.168.1.0/24)
 # Converts CIDR to list of IPs
 # Limited to /8 max 
-function cidr_to_ip {
+cidr_to_ip() {
 	local base=${1%/*}
 	local masksize=${1#*/}
 
