@@ -1,7 +1,15 @@
 #!/bin/bash
 
+# Capture script invocation for use in file output
+invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
+START_SCRIPT=$(date +%s%3N)
+start_stdout=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
+
 readonly PROGNAME='BashScan'
 readonly VERSION='0.0.6'
+readonly URL='https://github.com/astryzia/BashScan'
+
+printf "Starting %s %s ( %s ) at %s\n" "$PROGNAME" "$VERSION" "$URL" "$start_stdout"
 
 ########################################
 # help/usage 
@@ -18,7 +26,9 @@ Usage:  %s
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
 	[ -T | --timing <0-6> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
-	<x.x.x.x> OR <x.x.x.x-y>  Target IP (optional)\n\n" $PROGNAME
+	[ -oN <file.txt> ]        Normal output: similar to interactive output
+	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
+	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
 
@@ -26,3 +36,5 @@ Usage:  %s
 . lib/validations.sh
 . lib/core.sh
 . lib/functions.sh
+
+main

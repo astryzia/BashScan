@@ -1,4 +1,3 @@
-
 ########################################
 # Default values for the script options
 ########################################
@@ -11,7 +10,37 @@
 # Determine values in prep for scanning
 ########################################
 
+# Find max processes the user can instantiate, 
+# and set a cap for use in parallel execution;
+# `ulimit` should be a bash built-in, so hopefully
+# no need to check that it exist or use alternatives 
+max_num_processes=$(ulimit -u)
+limiting_factor=4 # this is somewhat arbitrary, but seems to work fine
+num_processes=$((max_num_processes/limiting_factor))
+
+# Validate the supplied timing option
 valid_timing $TIMING
+
+# Takes as input IP + CIDR (ex: 192.168.1.0/24)
+# Converts CIDR to list of IPs
+# Limited to /8 max 
+cidr_to_ip() {
+	local base=${1%/*}
+	local masksize=${1#*/}
+
+	local mask=$(( 0xFFFFFFFF << (32 - $masksize) ))
+
+	[ $masksize -lt 8 ] && { echo "Max range is /8."; exit 1;}
+	IFS=. read a b c d <<< $base
+
+	local ip=$(( ($b << 16) + ($c << 8) + $d ))
+	local ipstart=$(( $ip & $mask ))
+	local ipend=$(( ($ipstart | ~$mask ) & 0x7FFFFFFF ))
+
+	seq $ipstart $ipend | while read i; do
+    	printf "$a.$(( ($i & 0xFF0000) >> 16 )).$(( ($i & 0xFF00) >> 8 )).$(( $i & 0x00FF )) "
+	done 
+}
 
 # If a single IP or range of IPs are supplied,
 # check that addresses are valid and assign to 
@@ -21,22 +50,20 @@ if [[ -n "$@" ]]; then
 	# If the input doesn't validate as an IP, 
 	# check to see if a range was specified
 	if	! valid_ip "$TARGET"; then
-		# If there isn't a "-" in the input, something else 
-		# is going on; treat as invalid
-		if [[ -n "$(grep -i - <<< $@)" ]]; then
-			IFS='-' read start end <<< $TARGET
-			end=$(echo $start | cut -d"." -f1,2,3).$end
+		# If there is a "-" in input, treat as IP range
+		# FIXME: currently only handles 4th octet;
+		#        add support for ranges in all 4 octets
+		if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
+			IFS='-' read start_ip end_oct4 <<< $TARGET
+			network=$(echo $start_ip | cut -d"." -f1,2,3)
+			end_ip=$network.$end_oct4
+			start_oct4=$(echo $start_ip | cut -d"." -f4)
 			# If the beginning and ending IPs specified are 
 			# valid, assign all addresses in range to TARGETS array
-			if valid_ip "$start" && valid_ip "$end"; then	
-				TARGETS=()
-				i=$(echo $start | cut -d"." -f4)
-				end=$(echo $end | cut -d"." -f4)
-				if [ $i -lt $end ]; then
-					while [ $i -le $end ]; do
-						ip=$(echo $start | cut -d"." -f1,2,3).$i
-						TARGETS+=($ip)
-						let i=i+1
+			if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
+				if [[ "$start_oct4" -lt "$end_oct4" ]]; then
+					for oct4 in $(seq $start_oct4 $end_oct4); do
+						TARGETS+=("$network.$oct4")
 					done
 				else
 					usage
@@ -44,6 +71,16 @@ if [[ -n "$@" ]]; then
 			else
 				usage
 			fi
+		# If there is a "/" in the input, treat as CIDR
+		elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
+			# Sanity check base IP specified is valid
+			if ! valid_ip "${TARGET%/*}"; then
+				usage
+			else
+				TARGETS=("$(cidr_to_ip $TARGET)")
+			fi
+		# If there isn't a "-" or "/" in the input, something else 
+		# is going on; treat as invalid
 		else
 			usage
 		fi
@@ -116,15 +153,6 @@ if ! valid_ip response; then
 	fi
 fi
 
-printf "\nLocal IP:\t\t%s\n" $localip
-printf "Netmask:\t\t%s\n" $iprange
-printf "External IP:\t\t%s\n" $getip
-printf "Default Interface:\t%s\n" $default_interface
-
-if [ -n "$TARGET" ]; then
-	printf "Target:\t\t\t%s\n" $TARGET
-fi
-
 # Port list
 # Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
 # Custom:  User input from "-p | --ports" flags, either as a comma-separated list or a range
@@ -136,57 +164,29 @@ if [ -z "$ports" ]; then
 elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list of ports? 
 	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
 	for port in ${ports[@]}; do
-		isPort $port
+		valid_port $port
 	done
 elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
-	IFS='-' read start end <<< $ports
-	# If all ports in specified range are valid, 
-	# populate ports array with the full list
-	isPort $start && isPort $end
-	ports=()
-	i=$start
-	while [ $i -le $end ]; do
-		ports+=($i)
-		let i=i+1
-	done
+	# Treat "-p-" case as a request for all ports
+	if [[ "$ports" == "-" ]]; then
+		ports=( $(seq 0 65535) )
+	else
+		IFS='-' read start_port end_port <<< $ports
+		# If all ports in specified range are valid, 
+		# populate ports array with the full list
+		valid_port $start_port && valid_port $end_port
+		ports=( $(seq $start_port $end_port ))
+	fi
 else
-	isPort $ports
+	valid_port $ports
 fi
 
-# Try grabbing banners
-banners(){
-	host="$1"
-	port="$2"
-	# Trimmed out all but first line of response to clean up long http replies
-	# Also removed trailing \r which is common in http responses
-	banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo "">&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
-	if ! [ "$banner" = "" ]; then 
-		echo "| "$banner 2>/dev/null
-	fi
-}
-
-# Attempt reverse DNS resolution of target addresses
-revdns(){
-	ip=$1
-	if test $(which dig); then
-		name=$(dig +short +answer -x $ip | sed 's/.$//')
-	elif test $(which nslookup); then
-		name=$(nslookup $ip | cut -d$'\n' -f1 | grep -o '[^ ]*$' | sed 's/.$//')
-	elif test $(which host); then
-		name=$(host $ip | grep -o '[^ ]*$' | sed 's/.$//')
-	fi
-
-	if [ -n "$name" ]; then
-		printf $name 2>/dev/null
-	else
-		printf "NXDOMAIN"
-	fi
-}
+num_ports=${#ports[@]}
 
 # Determine which pingsweep method(s) will be used
 if test $(which arping); then
 	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
-		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+		arp_warning=true
 		SWEEP_METHOD="ICMP"
 	else
 		SWEEP_METHOD="ICMP/ARP"
@@ -194,7 +194,6 @@ if test $(which arping); then
 else
 	SWEEP_METHOD="ICMP"
 fi
-printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
 
 # Timing options (initially based on nmap Maximum TCP scan delay settings)
 # nmap values are in milliseconds - converted here for bash sleep in seconds

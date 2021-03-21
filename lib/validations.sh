@@ -12,8 +12,7 @@
 #   OR
 #      if valid_ip IP_ADDRESS; then echo good; else echo bad; fi
 #
-valid_ip()
-{
+valid_ip(){
     local  ip=$1
     local  stat=1
 
@@ -41,10 +40,12 @@ valid_timing(){
 
 # Validate port inputs:
 # Redirects to usage if port value is either not an integer or outside of 1-65535 range
-isPort(){
+valid_port(){
+    # validates integer
 	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
 		usage
-	elif ! ((0 < "$1" && "$1" < 65536)); then
+    # tcp/0 is valid
+	elif ! ((0 <= "$1" && "$1" <= 65535)); then
 		usage
 	fi
 }
