@@ -54,19 +54,16 @@ if [[ -n "$@" ]]; then
 		# FIXME: currently only handles 4th octet;
 		#        add support for ranges in all 4 octets
 		if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
-			IFS='-' read start end <<< $TARGET
-			end=$(echo $start | cut -d"." -f1,2,3).$end
+			IFS='-' read start_ip end_oct4 <<< $TARGET
+			network=$(echo $start_ip | cut -d"." -f1,2,3)
+			end_ip=$network.$end_oct4
+			start_oct4=$(echo $start_ip | cut -d"." -f4)
 			# If the beginning and ending IPs specified are 
 			# valid, assign all addresses in range to TARGETS array
-			if valid_ip "$start" && valid_ip "$end"; then	
-				TARGETS=()
-				i=$(echo $start | cut -d"." -f4)
-				end=$(echo $end | cut -d"." -f4)
-				if [ $i -lt $end ]; then
-					while [ $i -le $end ]; do
-						ip=$(echo $start | cut -d"." -f1,2,3).$i
-						TARGETS+=($ip)
-						let i=i+1
+			if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
+				if [[ "$start_oct4" -lt "$end_oct4" ]]; then
+					for oct4 in $(seq $start_oct4 $end_oct4); do
+						TARGETS+=("$network.$oct4")
 					done
 				else
 					usage
@@ -174,11 +171,11 @@ elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 	if [[ "$ports" == "-" ]]; then
 		ports=( $(seq 0 65535) )
 	else
-		IFS='-' read start end <<< $ports
+		IFS='-' read start_port end_port <<< $ports
 		# If all ports in specified range are valid, 
 		# populate ports array with the full list
-		valid_port $start && valid_port $end
-		ports=( $(seq $start $end ))
+		valid_port $start_port && valid_port $end_port
+		ports=( $(seq $start_port $end_port ))
 	fi
 else
 	valid_port $ports

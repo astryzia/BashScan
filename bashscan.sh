@@ -2,8 +2,8 @@
 
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
-START=$(date +%s%3N)
-start_stdout=$(date --date @"$(( $START / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
+START_SCRIPT=$(date +%s%3N)
+start_stdout=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
 
 readonly PROGNAME='BashScan'
 readonly VERSION='0.0.6'
@@ -183,19 +183,16 @@ if [[ -n "$@" ]]; then
 		# FIXME: currently only handles 4th octet;
 		#        add support for ranges in all 4 octets
 		if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
-			IFS='-' read start end <<< $TARGET
-			end=$(echo $start | cut -d"." -f1,2,3).$end
+			IFS='-' read start_ip end_oct4 <<< $TARGET
+			network=$(echo $start_ip | cut -d"." -f1,2,3)
+			end_ip=$network.$end_oct4
+			start_oct4=$(echo $start_ip | cut -d"." -f4)
 			# If the beginning and ending IPs specified are 
 			# valid, assign all addresses in range to TARGETS array
-			if valid_ip "$start" && valid_ip "$end"; then	
-				TARGETS=()
-				i=$(echo $start | cut -d"." -f4)
-				end=$(echo $end | cut -d"." -f4)
-				if [ $i -lt $end ]; then
-					while [ $i -le $end ]; do
-						ip=$(echo $start | cut -d"." -f1,2,3).$i
-						TARGETS+=($ip)
-						let i=i+1
+			if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
+				if [[ "$start_oct4" -lt "$end_oct4" ]]; then
+					for oct4 in $(seq $start_oct4 $end_oct4); do
+						TARGETS+=("$network.$oct4")
 					done
 				else
 					usage
@@ -303,11 +300,11 @@ elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
 	if [[ "$ports" == "-" ]]; then
 		ports=( $(seq 0 65535) )
 	else
-		IFS='-' read start end <<< $ports
+		IFS='-' read start_port end_port <<< $ports
 		# If all ports in specified range are valid, 
 		# populate ports array with the full list
-		valid_port $start && valid_port $end
-		ports=( $(seq $start $end ))
+		valid_port $start_port && valid_port $end_port
+		ports=( $(seq $start_port $end_port ))
 	fi
 else
 	valid_port $ports
@@ -583,7 +580,7 @@ main(){
 		printf "[+] No responsive hosts found\n\n"
 	fi
 
-	datestart_file=$(date --date @"$(( $START / 1000 ))" "+%c")
+	datestart_file=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%c")
 	file_header="$(printf "%s %s scan initiated %s as: %s" $PROGNAME $VERSION "$datestart_file" "$invoked")"
 
 	# File header
@@ -613,11 +610,12 @@ main(){
 	done;
 
 	TZ=$(date +%Z)
-	END=$(date +%s%3N)
-	runtime=$( echo "scale=3; ((($END - $START))/1000)" | bc )
+	END_SCAN=$(date +%s%3N)
+	# adding a leading "0" to fix parsing issues for sub-1 second runs
+	runtime="0"$( echo "scale=3; ((($END_SCAN - $START_SCRIPT))/1000)" | bc )
 	# inconsistent results when timezone is not specified
 	runtime_stdout=$(TZ=$TZ date -d @"$runtime" +%H:%M:%S.%3N)
-	end_file=$(date -d @"$(( $END / 1000 ))" +%c)
+	end_file=$(date -d @"$(( $END_SCAN / 1000 ))" +%c)
 
 	printf "%s done: %s %s scanned in %s\n" $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
 	

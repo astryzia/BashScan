@@ -2,8 +2,8 @@
 
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
-START=$(date +%s%3N)
-start_stdout=$(date --date @"$(( $START / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
+START_SCRIPT=$(date +%s%3N)
+start_stdout=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
 
 readonly PROGNAME='BashScan'
 readonly VERSION='0.0.6'

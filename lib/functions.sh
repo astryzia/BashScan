@@ -244,7 +244,7 @@ main(){
 		printf "[+] No responsive hosts found\n\n"
 	fi
 
-	datestart_file=$(date --date @"$(( $START / 1000 ))" "+%c")
+	datestart_file=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%c")
 	file_header="$(printf "%s %s scan initiated %s as: %s" $PROGNAME $VERSION "$datestart_file" "$invoked")"
 
 	# File header
@@ -274,11 +274,12 @@ main(){
 	done;
 
 	TZ=$(date +%Z)
-	END=$(date +%s%3N)
-	runtime=$( echo "scale=3; ((($END - $START))/1000)" | bc )
+	END_SCAN=$(date +%s%3N)
+	# adding a leading "0" to fix parsing issues for sub-1 second runs
+	runtime="0"$( echo "scale=3; ((($END_SCAN - $START_SCRIPT))/1000)" | bc )
 	# inconsistent results when timezone is not specified
 	runtime_stdout=$(TZ=$TZ date -d @"$runtime" +%H:%M:%S.%3N)
-	end_file=$(date -d @"$(( $END / 1000 ))" +%c)
+	end_file=$(date -d @"$(( $END_SCAN / 1000 ))" +%c)
 
 	printf "%s done: %s %s scanned in %s\n" $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
 	
