@@ -60,3 +60,7 @@ Alternatively, using the monolithic script
 `-T | --timing <0-6>` Timing template (default = 4)
 
 `-v | --version` Print version
+
+# Contributors
+
+The list of contributors can be found [here](https://github.com/astryzia/BashScan/graphs/contributors). Thank you for everything!
