@@ -26,16 +26,16 @@ cidr_to_ip() {
 }
 
 # Input: hostname
-# Output: first IP match
+# Output: IP
 resolve_host(){
 	local ip 
 	local host=$1
 	if test $(which dig); then
 		ip=$(dig +search +short $host)
 	elif test $(which nslookup); then
-		ip=$(nslookup $host | grep -A 1 Name | cut -d$'\n' -f2 | cut -d" " -f2)
+		ip=$(nslookup -type=A $host | grep -A 1 Name | cut -d$'\n' -f2 | cut -d" " -f2)
 	elif test $(which host); then
-		ip=$(host $host | grep -iav "not found" | rev | cut -d" " -f1 | rev)
+		ip=$(host -t A $host | grep -iav "not found" | rev | cut -d" " -f1 | rev)
 	fi
 
 	printf "$ip"
