@@ -21,6 +21,7 @@ usage() {
 Usage:  %s
 	[ -b | --banner ]         Attempt to grab banner during port scanning
 	[ -h | --help ]           Show this help message and exit.
+	[ -o | --open ]           Only show targets with open ports
 	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
 	[ -r | --root ]           Force ARP ping to run even if user doesn't have root privileges.
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
@@ -40,8 +41,8 @@ Usage:  %s
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
-	-o bhp:rt:T:v \
-	-l banner,help,oG:,oN:,ports:,root,timing:,top-ports:,version \
+	-o bhop:rt:T:v \
+	-l banner,help,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -61,8 +62,9 @@ eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-b  | --banner      ) BANNER=true               ; shift 1 ;;
-		-~  | --oG			) g_file="$2"				; shift 2 ;; 
-		-~ 	| --oN			) n_file="$2"				; shift 2 ;;
+		-~  | --oG          ) g_file="$2"               ; shift 2 ;; 
+		-~ 	| --oN          ) n_file="$2"               ; shift 2 ;;
+		-o  | --open        ) OPEN=true                 ; shift 1 ;;
 		-p  | --ports       ) ports="$2"                ; shift 2 ;;
 		-t  | --top-ports   ) TOP_PORTS="$2"            ; shift 2 ;;
 		-T  | --timing      ) TIMING="$2"               ; shift 2 ;;
@@ -134,6 +136,7 @@ valid_port(){
 : ${ROOT_CHECK:=true}
 : ${TIMING:=4}
 : ${TOP_PORTS:=20}
+: ${OPEN:=false}
 
 ########################################
 # Determine values in prep for scanning
@@ -593,19 +596,25 @@ main(){
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
 		portscan $host
-		normal_output # print to stdout
-		# If an output file is specified, also write to that
-		# FIXME: very basic output implementation... need handling for:
-		#		 file already exists - prompt for overwrite?
-		# 		 specified path doesn't exist
-		#		 path exists, but we don't have write permissions
-		if [[ -n "$n_file" ]]; then
-			# FIXME: output assumes tab width of 8 for alignment;
-			#		 expand tabs to spaces for consistent display?
-			normal_output >> $n_file
-		elif [[ -n "$g_file" ]]; then
-			# FIXME: banner reporting in grepable format needs work
-			grepable_output >> $g_file
+
+		# If we specify -o flag, only print results if one or more
+		# ports are found to be open
+		if ([[ "$OPEN" = true ]] && [[ "$count_liveports" > 0 ]]) || [[ "$OPEN" = false ]]; then
+			normal_output # print to stdout
+
+			# If an output file is specified, also write to that
+			# FIXME: very basic output implementation... need handling for:
+			#		 file already exists - prompt for overwrite?
+			# 		 specified path doesn't exist
+			#		 path exists, but we don't have write permissions
+			if [[ -n "$n_file" ]]; then
+				# FIXME: output assumes tab width of 8 for alignment;
+				#		 expand tabs to spaces for consistent display?
+				normal_output >> $n_file
+			elif [[ -n "$g_file" ]]; then
+				# FIXME: banner reporting in grepable format needs work
+				grepable_output >> $g_file
+			fi
 		fi
 	done;
 

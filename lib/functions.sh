@@ -257,19 +257,25 @@ main(){
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
 		portscan $host
-		normal_output # print to stdout
-		# If an output file is specified, also write to that
-		# FIXME: very basic output implementation... need handling for:
-		#		 file already exists - prompt for overwrite?
-		# 		 specified path doesn't exist
-		#		 path exists, but we don't have write permissions
-		if [[ -n "$n_file" ]]; then
-			# FIXME: output assumes tab width of 8 for alignment;
-			#		 expand tabs to spaces for consistent display?
-			normal_output >> $n_file
-		elif [[ -n "$g_file" ]]; then
-			# FIXME: banner reporting in grepable format needs work
-			grepable_output >> $g_file
+
+		# If we specify -o flag, only print results if one or more
+		# ports are found to be open
+		if ([[ "$OPEN" = true ]] && [[ "$count_liveports" > 0 ]]) || [[ "$OPEN" = false ]]; then
+			normal_output # print to stdout
+
+			# If an output file is specified, also write to that
+			# FIXME: very basic output implementation... need handling for:
+			#		 file already exists - prompt for overwrite?
+			# 		 specified path doesn't exist
+			#		 path exists, but we don't have write permissions
+			if [[ -n "$n_file" ]]; then
+				# FIXME: output assumes tab width of 8 for alignment;
+				#		 expand tabs to spaces for consistent display?
+				normal_output >> $n_file
+			elif [[ -n "$g_file" ]]; then
+				# FIXME: banner reporting in grepable format needs work
+				grepable_output >> $g_file
+			fi
 		fi
 	done;
 

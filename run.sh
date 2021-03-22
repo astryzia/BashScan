@@ -21,6 +21,7 @@ usage() {
 Usage:  %s
 	[ -b | --banner ]         Attempt to grab banner during port scanning
 	[ -h | --help ]           Show this help message and exit.
+	[ -o | --open ]           Only show targets with open ports
 	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
 	[ -r | --root ]           Force ARP ping to run even if user doesn't have root privileges.
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
