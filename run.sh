@@ -35,7 +35,5 @@ Usage:  %s
 
 . lib/args.sh
 . lib/validations.sh
-. lib/core.sh
 . lib/functions.sh
-
-main
+. lib/core.sh

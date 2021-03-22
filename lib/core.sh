@@ -207,3 +207,5 @@ case $TIMING in
 	5 )	DELAY=.005   ;;
 	6 )	DELAY=0      ;;
 esac
+
+main
