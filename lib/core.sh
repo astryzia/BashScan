@@ -22,27 +22,6 @@ num_processes=$((max_num_processes/limiting_factor))
 # Validate the supplied timing option
 valid_timing $TIMING
 
-# Takes as input IP + CIDR (ex: 192.168.1.0/24)
-# Converts CIDR to list of IPs
-# Limited to /8 max 
-cidr_to_ip() {
-	local base=${1%/*}
-	local masksize=${1#*/}
-
-	local mask=$(( 0xFFFFFFFF << (32 - $masksize) ))
-
-	[ $masksize -lt 8 ] && { echo "Max range is /8."; exit 1;}
-	IFS=. read a b c d <<< $base
-
-	local ip=$(( ($b << 16) + ($c << 8) + $d ))
-	local ipstart=$(( $ip & $mask ))
-	local ipend=$(( ($ipstart | ~$mask ) & 0x7FFFFFFF ))
-
-	seq $ipstart $ipend | while read i; do
-    	printf "$a.$(( ($i & 0xFF0000) >> 16 )).$(( ($i & 0xFF00) >> 8 )).$(( $i & 0x00FF )) "
-	done 
-}
-
 # If a single IP or range of IPs are supplied,
 # check that addresses are valid and assign to 
 # TARGET/TARGETS for later use
@@ -80,10 +59,15 @@ if [[ -n "$@" ]]; then
 			else
 				TARGETS=("$(cidr_to_ip $TARGET)")
 			fi
-		# If there isn't a "-" or "/" in the input, something else 
-		# is going on; treat as invalid
 		else
-			usage
+			# Is this a valid hostname?
+			check_hostname=$(resolve_host $TARGET)
+			if valid_ip $check_hostname; then
+				TARGET="$check_hostname"
+			# If all checks above fail, treat as invalid input
+			else
+				usage
+			fi
 		fi
 	fi
 fi

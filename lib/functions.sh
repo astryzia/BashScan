@@ -1,3 +1,46 @@
+########################################
+# Utility functions
+########################################
+
+# Takes as input IP + CIDR (ex: 192.168.1.0/24)
+# Converts CIDR to list of IPs
+# Limited to /8 max 
+cidr_to_ip() {
+	local base=${1%/*}
+	local masksize=${1#*/}
+
+	local mask=$(( 0xFFFFFFFF << (32 - $masksize) ))
+
+	[ $masksize -lt 8 ] && { echo "Max range is /8."; exit 1;}
+	OIFS=$IFS
+	IFS=. read a b c d <<< $base
+	IFS=$OIFS
+
+	local ip=$(( ($b << 16) + ($c << 8) + $d ))
+	local ipstart=$(( $ip & $mask ))
+	local ipend=$(( ($ipstart | ~$mask ) & 0x7FFFFFFF ))
+
+	seq $ipstart $ipend | while read i; do
+    	printf "$a.$(( ($i & 0xFF0000) >> 16 )).$(( ($i & 0xFF00) >> 8 )).$(( $i & 0x00FF )) "
+	done 
+}
+
+# Input: hostname
+# Output: first IP match
+resolve_host(){
+	local ip 
+	local host=$1
+	if test $(which dig); then
+		ip=$(dig +search +short $host)
+	elif test $(which nslookup); then
+		ip=$(nslookup $host | grep -A 1 Name | cut -d$'\n' -f2 | cut -d" " -f2)
+	elif test $(which host); then
+		ip=$(host $host | grep -iav "not found" | rev | cut -d" " -f1 | rev)
+	fi
+
+	printf "$ip"
+}
+
 
 ########################################
 # Scanning functions
