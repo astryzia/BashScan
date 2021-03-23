@@ -20,6 +20,7 @@ usage() {
 	printf "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
 Usage:  %s
 	[ -b | --banner ]         Attempt to grab banner during port scanning
+	[ -e | --exclude ]        Exclude targets from scan
 	[ -h | --help ]           Show this help message and exit.
 	[ -o | --open ]           Only show targets with open ports
 	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
@@ -27,9 +28,10 @@ Usage:  %s
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
 	[ -T | --timing <0-6> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
-	[ -iL <file.txt> ]        Read list of targets from input file
-	[ -oN <file.txt> ]        Normal output: similar to interactive output
-	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
+	[ -iL <file> ]            Add list of targets from input file
+	[ -xL <file> ]            Exclude list of targets from input file
+	[ -oN <file> ]            Normal output: similar to interactive output
+	[ -oG <file> ]            Grepable output: comma-delimited, each host on a single line
 	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
@@ -41,8 +43,8 @@ Usage:  %s
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
-	-o bhop:rt:T:v \
-	-l banner,help,iL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
+	-o be:hop:rt:T:v \
+	-l banner,exclude:,help,iL:,xL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -62,7 +64,9 @@ eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-b  | --banner      ) BANNER=true               ; shift 1 ;;
+		-e  | --exclude     ) exclude="$2"              ; shift 2 ;;
 		-~  | --iL          ) i_file="$2"               ; shift 2 ;;
+		-~  | --xL          ) x_file="$2"               ; shift 2 ;;
 		-~  | --oG          ) g_file="$2"               ; shift 2 ;; 
 		-~  | --oN          ) n_file="$2"               ; shift 2 ;;
 		-o  | --open        ) OPEN=true                 ; shift 1 ;;
@@ -173,11 +177,12 @@ resolve_host(){
 	printf "$ip"
 }
 
-# 
 populate_targets(){
 # Global target value set in core.sh
 # set local to avoid clobbering
 local TARGET=$1
+local list_type=$2
+local valid_targets
 
 # If there is a "-" in input, treat as IP range
 # FIXME: currently only handles 4th octet;
@@ -192,7 +197,7 @@ if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
 	if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
 		if [[ "$start_oct4" -lt "$end_oct4" ]]; then
 			for oct4 in $(seq $start_oct4 $end_oct4); do
-				TARGETS+=("$network.$oct4")
+				valid_targets+=("$network.$oct4")
 			done
 		else
 			if [[ -z "$i_file" ]]; then usage; fi
@@ -206,14 +211,14 @@ elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
 	if ! valid_ip "${TARGET%/*}"; then
 		if [[ -z "$i_file" ]]; then usage; fi
 	else
-		TARGETS+=("$(cidr_to_ip $TARGET)")
+		valid_targets+=("$(cidr_to_ip $TARGET)")
 	fi
 # Comma-separated list?
 elif  [[ -n "$(grep -i , <<< $TARGET)" ]]; then
 	read -d ',' -a comma_targets <<< "$TARGET" 
 	for comma_target in ${comma_targets[@]}; do
 		if valid_ip $comma_target; then
-			TARGETS+=($comma_target)
+			valid_targets+=($comma_target)
 		fi
 	done
 else
@@ -222,11 +227,19 @@ else
 	if valid_ip $check_hostname; then
 		TARGET="$check_hostname"
 	elif valid_ip $TARGET; then
-		TARGETS+=("$TARGET")
+		valid_targets+=("$TARGET")
 	# If all checks above fail, treat as invalid input
 	else
 		if [[ -z "$i_file" ]]; then usage; fi
 	fi
+fi
+
+# Copy local array to the appropriate glob, 
+# depending on whether we're adding or excluding
+if [[ "$list_type" == "add" ]]; then
+	TARGETS+=("${valid_targets[@]}")
+elif [[ "$list_type" == "exclude" ]]; then
+	EXCLUSIONS+=("${valid_targets[@]}")
 fi
 }
 
@@ -562,7 +575,7 @@ valid_timing $TIMING
 # Check validity and populate target list
 if [[ -n "$@" ]]; then
 	TARGET=$@
-	populate_targets $TARGET
+	populate_targets $TARGET "add"
 fi
 
 # If an input file was specified, pass that list
@@ -580,7 +593,7 @@ if [[ -n "$i_file" ]]; then
 	# Since target file could potentially contain several
 	# thousand IPs, just use the file name as the target
 	# for reporting 
-	TARGET+="+ $i_file"
+	TARGET+=" + $i_file"
 	OIFS=$IFS
 	IFS=$'\n'
 	read -d '' -r -a file_targets < $i_file
@@ -589,10 +602,47 @@ if [[ -n "$i_file" ]]; then
 		if valid_ip "$file_target"; then
 			TARGETS+=($file_target)
 		else
-			populate_targets $file_target
+			populate_targets $file_target "add"
 		fi
 	done
 fi
+
+# After we've added valid targets to our array, 
+# check to see if we have any exclusions specified.
+# Remove any matching exclusions from the target list.
+# We don't *need* to validate the exclusions as IPs, 
+# since any that fail to match a host in our target 
+# list simply get no further processing. However, 
+# passing the exclusions through populate_targets 
+# allows us to consistently expand ranges, CIDRs, etc.
+# the same way we do for adding targets. 
+if [[ -n "$exclude" ]]; then
+	populate_targets $exclude "exclude"
+fi
+
+# In addition to exclusion via direct input on cli,
+# we can accept a list of hosts in file input for 
+# exclusion.
+if [[ -n "$x_file" ]]; then
+	OIFS=$IFS
+	IFS=$'\n'
+	read -d '' -r -a exclusion_targets < $x_file
+	IFS=$OIFS
+	for exclusion_target in ${exclusion_targets[@]}; do
+		if valid_ip "$exclusion_target"; then
+			EXCLUSIONS+=($exclusion_target)
+		else
+			populate_targets $exclusion_targets "exclude"
+		fi
+	done
+fi
+
+# After exclusions from cli and file inputs are 
+# processed, modify the TARGETS array, removing
+# any matches
+for exclusion in ${EXCLUSIONS[@]}; do
+	TARGETS=( ${TARGETS[@]/$exclusion} )
+done
 
 # determine default network interface
 if test $(which route); then
@@ -638,7 +688,9 @@ conn="'GET / HTTP/1.1\r\nhost: ' $httpextip '\r\n\r\n'"
 response=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$httpextip/80; echo -e $conn>&3; cat<&3" | tail -1)
 
 # If the above method fails, then fallback to builtin utils for this
-if ! valid_ip response; then
+if valid_ip response; then
+	getip=$reponse
+else
 	if test $(which curl); then
 		getip=$(curl -s $httpextip) # whatismyip.akamai.com may be a consistently faster option
 	elif test $(which wget); then

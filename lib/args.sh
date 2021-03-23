@@ -5,8 +5,8 @@
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
-	-o bhop:rt:T:v \
-	-l banner,help,iL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
+	-o be:hop:rt:T:v \
+	-l banner,exclude:,help,iL:,xL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -26,7 +26,9 @@ eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-b  | --banner      ) BANNER=true               ; shift 1 ;;
+		-e  | --exclude     ) exclude="$2"              ; shift 2 ;;
 		-~  | --iL          ) i_file="$2"               ; shift 2 ;;
+		-~  | --xL          ) x_file="$2"               ; shift 2 ;;
 		-~  | --oG          ) g_file="$2"               ; shift 2 ;; 
 		-~  | --oN          ) n_file="$2"               ; shift 2 ;;
 		-o  | --open        ) OPEN=true                 ; shift 1 ;;
