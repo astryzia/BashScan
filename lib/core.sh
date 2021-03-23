@@ -5,6 +5,7 @@
 : ${ROOT_CHECK:=true}
 : ${TIMING:=4}
 : ${TOP_PORTS:=20}
+: ${OPEN:=false}
 
 ########################################
 # Determine values in prep for scanning
@@ -21,70 +22,45 @@ num_processes=$((max_num_processes/limiting_factor))
 # Validate the supplied timing option
 valid_timing $TIMING
 
-# Takes as input IP + CIDR (ex: 192.168.1.0/24)
-# Converts CIDR to list of IPs
-# Limited to /8 max 
-cidr_to_ip() {
-	local base=${1%/*}
-	local masksize=${1#*/}
-
-	local mask=$(( 0xFFFFFFFF << (32 - $masksize) ))
-
-	[ $masksize -lt 8 ] && { echo "Max range is /8."; exit 1;}
-	IFS=. read a b c d <<< $base
-
-	local ip=$(( ($b << 16) + ($c << 8) + $d ))
-	local ipstart=$(( $ip & $mask ))
-	local ipend=$(( ($ipstart | ~$mask ) & 0x7FFFFFFF ))
-
-	seq $ipstart $ipend | while read i; do
-    	printf "$a.$(( ($i & 0xFF0000) >> 16 )).$(( ($i & 0xFF00) >> 8 )).$(( $i & 0x00FF )) "
-	done 
-}
-
-# If a single IP or range of IPs are supplied,
-# check that addresses are valid and assign to 
-# TARGET/TARGETS for later use
+# If there is remaining input not handled by a flag,
+# this *should* be either a:
+# 		* Hostname
+#		* Single IP
+# 		* IP Range
+# 		* IP + CIDR
+# Check validity and populate target list
 if [[ -n "$@" ]]; then
 	TARGET=$@
-	# If the input doesn't validate as an IP, 
-	# check to see if a range was specified
-	if	! valid_ip "$TARGET"; then
-		# If there is a "-" in input, treat as IP range
-		# FIXME: currently only handles 4th octet;
-		#        add support for ranges in all 4 octets
-		if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
-			IFS='-' read start_ip end_oct4 <<< $TARGET
-			network=$(echo $start_ip | cut -d"." -f1,2,3)
-			end_ip=$network.$end_oct4
-			start_oct4=$(echo $start_ip | cut -d"." -f4)
-			# If the beginning and ending IPs specified are 
-			# valid, assign all addresses in range to TARGETS array
-			if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
-				if [[ "$start_oct4" -lt "$end_oct4" ]]; then
-					for oct4 in $(seq $start_oct4 $end_oct4); do
-						TARGETS+=("$network.$oct4")
-					done
-				else
-					usage
-				fi
-			else
-				usage
-			fi
-		# If there is a "/" in the input, treat as CIDR
-		elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
-			# Sanity check base IP specified is valid
-			if ! valid_ip "${TARGET%/*}"; then
-				usage
-			else
-				TARGETS=("$(cidr_to_ip $TARGET)")
-			fi
-		# If there isn't a "-" or "/" in the input, something else 
-		# is going on; treat as invalid
+	populate_targets $TARGET
+fi
+
+# If an input file was specified, pass that list
+# into populate_targets function. Here, we want to 
+# append to any host(s) provided as inputs on the 
+# command line; later, we can add an exclusion flag
+# to use either the cli input or the file input to
+# remove targets from the list, rather than adding
+
+# Input format: this should gracefully accept:
+# * hosts on separate lines
+# * comma-delimited or space-delimited list of hosts
+# * mixed types of input (single host, lists, ranges, CIDR)
+if [[ -n "$i_file" ]]; then
+	# Since target file could potentially contain several
+	# thousand IPs, just use the file name as the target
+	# for reporting 
+	TARGET+="+ $i_file"
+	OIFS=$IFS
+	IFS=$'\n'
+	read -d '' -r -a file_targets < $i_file
+	IFS=$OIFS
+	for file_target in ${file_targets[@]}; do
+		if valid_ip "$file_target"; then
+			TARGETS+=($file_target)
 		else
-			usage
+			populate_targets $file_target
 		fi
-	fi
+	done
 fi
 
 # determine default network interface
@@ -206,3 +182,5 @@ case $TIMING in
 	5 )	DELAY=.005   ;;
 	6 )	DELAY=0      ;;
 esac
+
+main

@@ -21,17 +21,18 @@ usage() {
 Usage:  %s
 	[ -b | --banner ]         Attempt to grab banner during port scanning
 	[ -h | --help ]           Show this help message and exit.
+	[ -o | --open ]           Only show targets with open ports
 	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
 	[ -r | --root ]           Force ARP ping to run even if user doesn't have root privileges.
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
 	[ -T | --timing <0-6> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
+	[ -iL <file.txt> ]        Read list of targets from input file
 	[ -oN <file.txt> ]        Normal output: similar to interactive output
 	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
 	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
-
 
 
 ########################################
@@ -40,8 +41,8 @@ Usage:  %s
 
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
-	-o bhp:rt:T:v \
-	-l banner,help,oG:,oN:,ports:,root,timing:,top-ports:,version \
+	-o bhop:rt:T:v \
+	-l banner,help,iL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -49,20 +50,22 @@ if [ "$VALID_ARGUMENTS" != "0" ]; then
   usage
 fi
 
-# for file output options, we mimic the familiar format of nmap, 
-# using -oG, -oN, etc; note: the "-a" option above allows use of
+# Aligning flags with nmap syntax where possible to flatten the
+# learning curve. Note: the "-a" option above allows use of
 # a single dash for "long" options in addition to double dash; 
 # since getopt doesn't support a multi-char "short" option, this 
-# is one workaround. also, the "short" options for output aren't
-# used (no associated chars in the "-o" string above), but getopt 
-# doesn't work if nothing is present in the short fields for the 
-# case statement, so we use placeholders "~" here
+# is one workaround for double letter flags (-iL/-oN/-oG, etc.). 
+# In cases where the "short" options for output aren't used 
+# (no associated chars in the "-o" string above), we use placeholder
+# chars, like "~". 
 eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-b  | --banner      ) BANNER=true               ; shift 1 ;;
-		-~  | --oG			) g_file="$2"				; shift 2 ;; 
-		-~ 	| --oN			) n_file="$2"				; shift 2 ;;
+		-~  | --iL          ) i_file="$2"               ; shift 2 ;;
+		-~  | --oG          ) g_file="$2"               ; shift 2 ;; 
+		-~  | --oN          ) n_file="$2"               ; shift 2 ;;
+		-o  | --open        ) OPEN=true                 ; shift 1 ;;
 		-p  | --ports       ) ports="$2"                ; shift 2 ;;
 		-t  | --top-ports   ) TOP_PORTS="$2"            ; shift 2 ;;
 		-T  | --timing      ) TIMING="$2"               ; shift 2 ;;
@@ -128,27 +131,8 @@ valid_port(){
 	fi
 }
 ########################################
-# Default values for the script options
+# Utility functions
 ########################################
-: ${BANNER:=false}
-: ${ROOT_CHECK:=true}
-: ${TIMING:=4}
-: ${TOP_PORTS:=20}
-
-########################################
-# Determine values in prep for scanning
-########################################
-
-# Find max processes the user can instantiate, 
-# and set a cap for use in parallel execution;
-# `ulimit` should be a bash built-in, so hopefully
-# no need to check that it exist or use alternatives 
-max_num_processes=$(ulimit -u)
-limiting_factor=4 # this is somewhat arbitrary, but seems to work fine
-num_processes=$((max_num_processes/limiting_factor))
-
-# Validate the supplied timing option
-valid_timing $TIMING
 
 # Takes as input IP + CIDR (ex: 192.168.1.0/24)
 # Converts CIDR to list of IPs
@@ -160,7 +144,9 @@ cidr_to_ip() {
 	local mask=$(( 0xFFFFFFFF << (32 - $masksize) ))
 
 	[ $masksize -lt 8 ] && { echo "Max range is /8."; exit 1;}
+	OIFS=$IFS
 	IFS=. read a b c d <<< $base
+	IFS=$OIFS
 
 	local ip=$(( ($b << 16) + ($c << 8) + $d ))
 	local ipstart=$(( $ip & $mask ))
@@ -171,170 +157,79 @@ cidr_to_ip() {
 	done 
 }
 
-# If a single IP or range of IPs are supplied,
-# check that addresses are valid and assign to 
-# TARGET/TARGETS for later use
-if [[ -n "$@" ]]; then
-	TARGET=$@
-	# If the input doesn't validate as an IP, 
-	# check to see if a range was specified
-	if	! valid_ip "$TARGET"; then
-		# If there is a "-" in input, treat as IP range
-		# FIXME: currently only handles 4th octet;
-		#        add support for ranges in all 4 octets
-		if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
-			IFS='-' read start_ip end_oct4 <<< $TARGET
-			network=$(echo $start_ip | cut -d"." -f1,2,3)
-			end_ip=$network.$end_oct4
-			start_oct4=$(echo $start_ip | cut -d"." -f4)
-			# If the beginning and ending IPs specified are 
-			# valid, assign all addresses in range to TARGETS array
-			if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
-				if [[ "$start_oct4" -lt "$end_oct4" ]]; then
-					for oct4 in $(seq $start_oct4 $end_oct4); do
-						TARGETS+=("$network.$oct4")
-					done
-				else
-					usage
-				fi
-			else
-				usage
-			fi
-		# If there is a "/" in the input, treat as CIDR
-		elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
-			# Sanity check base IP specified is valid
-			if ! valid_ip "${TARGET%/*}"; then
-				usage
-			else
-				TARGETS=("$(cidr_to_ip $TARGET)")
-			fi
-		# If there isn't a "-" or "/" in the input, something else 
-		# is going on; treat as invalid
+# Input: hostname
+# Output: IP
+resolve_host(){
+	local ip 
+	local host=$1
+	if test $(which dig); then
+		ip=$(dig +search +short $host)
+	elif test $(which nslookup); then
+		ip=$(nslookup -type=A $host | grep -A 1 Name | cut -d$'\n' -f2 | cut -d" " -f2)
+	elif test $(which host); then
+		ip=$(host -t A $host | grep -iav "not found" | rev | cut -d" " -f1 | rev)
+	fi
+
+	printf "$ip"
+}
+
+# 
+populate_targets(){
+# Global target value set in core.sh
+# set local to avoid clobbering
+local TARGET=$1
+
+# If there is a "-" in input, treat as IP range
+# FIXME: currently only handles 4th octet;
+#        add support for ranges in all 4 octets
+if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
+	IFS='-' read start_ip end_oct4 <<< $TARGET
+	network=$(echo $start_ip | cut -d"." -f1,2,3)
+	end_ip=$network.$end_oct4
+	start_oct4=$(echo $start_ip | cut -d"." -f4)
+	# If the beginning and ending IPs specified are 
+	# valid, assign all addresses in range to TARGETS array
+	if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
+		if [[ "$start_oct4" -lt "$end_oct4" ]]; then
+			for oct4 in $(seq $start_oct4 $end_oct4); do
+				TARGETS+=("$network.$oct4")
+			done
 		else
-			usage
+			if [[ -z "$i_file" ]]; then usage; fi
 		fi
-	fi
-fi
-
-# determine default network interface
-if test $(which route); then
-	#Output of `route` should consistently show interface name as last field
-	default_interface=$(route | grep '^default' | grep -o '[^ ]*$')
-elif test $(which ip); then
-	#FIXME: confirm that `ip route` field output is consistent across systems or use a different method
-	default_interface=$(ip route show default | cut -d" " -f5) 
-else 
-	# fallback to reading interface name from /proc
-	default_interface=$(cat /proc/net/dev | grep -v lo | cut -d$'\n' -f3 | cut -d":" -f1)
-fi
-
-# determine local IP and CIDR for default interface
-if test $(which ip); then
-	localaddr=$(ip -o -4 addr show $default_interface | tr -s " " | cut -d" " -f4)
-	IFS=/ read localip netCIDR <<< $localaddr
-elif test $(which ifconfig); then
-    localaddr=$(ifconfig $default_interface | grep -Eo '(addr:)?([0-9]*\.){3}[0-9]*')
-    localip=$(cut -d$'\n' -f1 <<< $localaddr)
-    netmask=$(cut -d$'\n' -f2 <<< $localaddr)
-    # ifconfig doesn't output CIDR, but we can calculate it from the netmask bits
-    c=0 x=0$( printf '%o' "${netmask//./ }" )
-    while [ $x -gt 0 ]; do
-      	let c+=$((x%2)) 'x>>=1'
-    done
-    netCIDR=$c
-else
-    localip=$(hostname -I | cut -d" " -f1)
-    # FIXME: in an edge case where neither ifconfig nor iproute2 utils are available
-    #        need to get CIDR some other way
-fi
-
-## FIXME: these values for network and iprange are only valid for /24 CIDRs.
-#         need to update the method if/when custom CIDRs are allowed
-network=$(echo $localip | cut -d"." -f1,2,3)
-iprange=$(echo $network".0/"$netCIDR)
-
-# Determine external IP
-# Try /dev/tcp method first
-httpextip="icanhazip.com"
-conn="'GET / HTTP/1.1\r\nhost: ' $httpextip '\r\n\r\n'"
-response=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$httpextip/80; echo -e $conn>&3; cat<&3" | tail -1)
-
-# If the above method fails, then fallback to builtin utils for this
-if ! valid_ip response; then
-	if test $(which curl); then
-		getip=$(curl -s $httpextip) # whatismyip.akamai.com may be a consistently faster option
-	elif test $(which wget); then
-		getip=$(wget -O- -q $httpextip)
-	elif test $(which dig); then
-		getip=$(dig +short myip.opendns.com @resolver1.opendns.com)
-	elif test $(which telnet); then
-		getip=$(telnet telnetmyip.com 2>/dev/null | grep ^\"ip | cut -d"\"" -f4)
-	elif test $(which ssh); then
-		# Not usually a great idea to disable StrictHostKeyChecking, but
-		# in this case, we aren't doing anything sensitive in the connection.
-		# Leaving it enabled will prompt for confirming key on first connection,
-		# rather than simply returning the output we want
-		getip=$(ssh -o StrictHostKeyChecking=no sshmyip.com 2>/dev/null |  grep ^\"ip | cut -d"\"" -f4)
 	else
-		#We probably have enough methods above to make failure relatively unlikely.
-		#So, if we reach this point, there may be no WAN connectivity.
-		getip="Failed to determine. Host may not have external connectivity."
+		if [[ -z "$i_file" ]]; then usage; fi
 	fi
-fi
-
-# Port list
-# Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
-# Custom:  User input from "-p | --ports" flags, either as a comma-separated list or a range
-if [ -z "$ports" ]; then
-	# TCP ports from the nmap database ordered by frequency of use, stored in nmap-services:
-	# `cat /usr/share/nmap/nmap-services | grep "tcp" | sort -r -k3 | column -t | tr -s " "`
-	tcp_ports=($(cat lib/nmap-services | cut -d" " -f2 | cut -d"/" -f1 | tr $'\n' " "))
-	ports=(${tcp_ports[@]:0:$TOP_PORTS})
-elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list of ports? 
-	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
-	for port in ${ports[@]}; do
-		valid_port $port
+# If there is a "/" in the input, treat as CIDR
+elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
+	# Sanity check base IP specified is valid
+	if ! valid_ip "${TARGET%/*}"; then
+		if [[ -z "$i_file" ]]; then usage; fi
+	else
+		TARGETS+=("$(cidr_to_ip $TARGET)")
+	fi
+# Comma-separated list?
+elif  [[ -n "$(grep -i , <<< $TARGET)" ]]; then
+	read -d ',' -a comma_targets <<< "$TARGET" 
+	for comma_target in ${comma_targets[@]}; do
+		if valid_ip $comma_target; then
+			TARGETS+=($comma_target)
+		fi
 	done
-elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
-	# Treat "-p-" case as a request for all ports
-	if [[ "$ports" == "-" ]]; then
-		ports=( $(seq 0 65535) )
-	else
-		IFS='-' read start_port end_port <<< $ports
-		# If all ports in specified range are valid, 
-		# populate ports array with the full list
-		valid_port $start_port && valid_port $end_port
-		ports=( $(seq $start_port $end_port ))
-	fi
 else
-	valid_port $ports
-fi
-
-num_ports=${#ports[@]}
-
-# Determine which pingsweep method(s) will be used
-if test $(which arping); then
-	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
-		arp_warning=true
-		SWEEP_METHOD="ICMP"
+	# Is this a valid hostname?
+	check_hostname=$(resolve_host $TARGET)
+	if valid_ip $check_hostname; then
+		TARGET="$check_hostname"
+	elif valid_ip $TARGET; then
+		TARGETS+=("$TARGET")
+	# If all checks above fail, treat as invalid input
 	else
-		SWEEP_METHOD="ICMP/ARP"
+		if [[ -z "$i_file" ]]; then usage; fi
 	fi
-else
-	SWEEP_METHOD="ICMP"
 fi
+}
 
-# Timing options (initially based on nmap Maximum TCP scan delay settings)
-# nmap values are in milliseconds - converted here for bash sleep in seconds
-case $TIMING in
-	0 )	DELAY=300    ;;
-	1 )	DELAY=15     ;;
-	2 )	DELAY=1      ;;
-	3 )	DELAY=.1     ;;
-	4 )	DELAY=.010   ;;
-	5 )	DELAY=.005   ;;
-	6 )	DELAY=0      ;;
-esac
 ########################################
 # Scanning functions
 ########################################
@@ -369,10 +264,18 @@ pingsweep(){
 			pingcheck "$ip"
 		done;
 	else
-		for ip in {1..254}; do
-			TARGET="$network.$ip"
-			pingcheck "$TARGET"
-		done;
+		# If user originally specified a target, 
+		# either via cli or file input, and none of the
+		# targets validated, we should let them know that
+		# rather than failing over to our default scan
+		if [[ -n "$TARGET" ]]; then
+			printf ""
+		else
+			for ip in {1..254}; do
+				TARGET="$network.$ip"
+				pingcheck "$TARGET"
+			done;
+		fi
 	fi
 }
 
@@ -386,7 +289,7 @@ portscan(){
 		scan+="sleep $DELAY; (echo >/dev/tcp/$host/$port) >& /dev/null#"
 	done;
 
-	# Caveat: this function really speeds up the scans, but
+	# FIXME: ParallelExec really speeds up the scans, but
 	# it also somewhat breaks the Timing settings. Need more
 	# thought on how best to implement timing in a parallelized 
 	# workload. $num_processes is defined in core.sh, based on 
@@ -395,7 +298,7 @@ portscan(){
 	LIVEPORTS=( $(ParallelExec "$num_processes" "$scan"))
 	count_liveports=${#LIVEPORTS[@]}
 
-	# Do this only for live ports to save time
+	# Grab banners only for live ports to save time
 	# Not currently parallel - consider adding for perf increase
 	if [ "$BANNER" = true ]; then
 		for port in ${LIVEPORTS[@]}; do
@@ -555,7 +458,7 @@ main(){
 	printf "Default Interface:\t%s\n" $default_interface
 
 	if [ -n "$TARGET" ]; then
-		printf "Target:\t\t\t%s\n" $TARGET
+		printf "Target:\t\t\t%s\n" "$TARGET"
 	fi
 
 	if [ "$arp_warning" = true ]; then
@@ -564,13 +467,7 @@ main(){
 
 	printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
 
-	# Single ping for custom target, otherwise sweep
-	if [ -n "$TARGET" ] && [ -z "$TARGETS" ]; then
-		LIVEHOSTS=($(pingcheck $TARGET | sort -V | uniq ))
-	else
-		LIVEHOSTS=($(pingsweep | sort -V | uniq))
-	fi
-
+	LIVEHOSTS=($(pingsweep | sort -V | uniq))
 	num_hosts=${#LIVEHOSTS[@]}
 
 	if [ "$num_hosts" -gt 0 ]; then
@@ -593,19 +490,25 @@ main(){
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
 		portscan $host
-		normal_output # print to stdout
-		# If an output file is specified, also write to that
-		# FIXME: very basic output implementation... need handling for:
-		#		 file already exists - prompt for overwrite?
-		# 		 specified path doesn't exist
-		#		 path exists, but we don't have write permissions
-		if [[ -n "$n_file" ]]; then
-			# FIXME: output assumes tab width of 8 for alignment;
-			#		 expand tabs to spaces for consistent display?
-			normal_output >> $n_file
-		elif [[ -n "$g_file" ]]; then
-			# FIXME: banner reporting in grepable format needs work
-			grepable_output >> $g_file
+
+		# If we specify -o flag, only print results if one or more
+		# ports are found to be open
+		if ([[ "$OPEN" = true ]] && [[ "$count_liveports" > 0 ]]) || [[ "$OPEN" = false ]]; then
+			normal_output # print to stdout
+
+			# If an output file is specified, also write to that
+			# FIXME: very basic output implementation... need handling for:
+			#		 file already exists - prompt for overwrite?
+			# 		 specified path doesn't exist
+			#		 path exists, but we don't have write permissions
+			if [[ -n "$n_file" ]]; then
+				# FIXME: output assumes tab width of 8 for alignment;
+				#		 expand tabs to spaces for consistent display?
+				normal_output >> $n_file
+			elif [[ -n "$g_file" ]]; then
+				# FIXME: banner reporting in grepable format needs work
+				grepable_output >> $g_file
+			fi
 		fi
 	done;
 
@@ -626,5 +529,189 @@ main(){
 		printf "# %s done at %s -- %s %s scanned in %s" $PROGNAME "$end_file" $num_hosts $(plural $num_hosts host) "$runtime_stdout" >> $g_file
 	fi
 }
+########################################
+# Default values for the script options
+########################################
+: ${BANNER:=false}
+: ${ROOT_CHECK:=true}
+: ${TIMING:=4}
+: ${TOP_PORTS:=20}
+: ${OPEN:=false}
+
+########################################
+# Determine values in prep for scanning
+########################################
+
+# Find max processes the user can instantiate, 
+# and set a cap for use in parallel execution;
+# `ulimit` should be a bash built-in, so hopefully
+# no need to check that it exist or use alternatives 
+max_num_processes=$(ulimit -u)
+limiting_factor=4 # this is somewhat arbitrary, but seems to work fine
+num_processes=$((max_num_processes/limiting_factor))
+
+# Validate the supplied timing option
+valid_timing $TIMING
+
+# If there is remaining input not handled by a flag,
+# this *should* be either a:
+# 		* Hostname
+#		* Single IP
+# 		* IP Range
+# 		* IP + CIDR
+# Check validity and populate target list
+if [[ -n "$@" ]]; then
+	TARGET=$@
+	populate_targets $TARGET
+fi
+
+# If an input file was specified, pass that list
+# into populate_targets function. Here, we want to 
+# append to any host(s) provided as inputs on the 
+# command line; later, we can add an exclusion flag
+# to use either the cli input or the file input to
+# remove targets from the list, rather than adding
+
+# Input format: this should gracefully accept:
+# * hosts on separate lines
+# * comma-delimited or space-delimited list of hosts
+# * mixed types of input (single host, lists, ranges, CIDR)
+if [[ -n "$i_file" ]]; then
+	# Since target file could potentially contain several
+	# thousand IPs, just use the file name as the target
+	# for reporting 
+	TARGET+="+ $i_file"
+	OIFS=$IFS
+	IFS=$'\n'
+	read -d '' -r -a file_targets < $i_file
+	IFS=$OIFS
+	for file_target in ${file_targets[@]}; do
+		if valid_ip "$file_target"; then
+			TARGETS+=($file_target)
+		else
+			populate_targets $file_target
+		fi
+	done
+fi
+
+# determine default network interface
+if test $(which route); then
+	#Output of `route` should consistently show interface name as last field
+	default_interface=$(route | grep '^default' | grep -o '[^ ]*$')
+elif test $(which ip); then
+	#FIXME: confirm that `ip route` field output is consistent across systems or use a different method
+	default_interface=$(ip route show default | cut -d" " -f5) 
+else 
+	# fallback to reading interface name from /proc
+	default_interface=$(cat /proc/net/dev | grep -v lo | cut -d$'\n' -f3 | cut -d":" -f1)
+fi
+
+# determine local IP and CIDR for default interface
+if test $(which ip); then
+	localaddr=$(ip -o -4 addr show $default_interface | tr -s " " | cut -d" " -f4)
+	IFS=/ read localip netCIDR <<< $localaddr
+elif test $(which ifconfig); then
+    localaddr=$(ifconfig $default_interface | grep -Eo '(addr:)?([0-9]*\.){3}[0-9]*')
+    localip=$(cut -d$'\n' -f1 <<< $localaddr)
+    netmask=$(cut -d$'\n' -f2 <<< $localaddr)
+    # ifconfig doesn't output CIDR, but we can calculate it from the netmask bits
+    c=0 x=0$( printf '%o' "${netmask//./ }" )
+    while [ $x -gt 0 ]; do
+      	let c+=$((x%2)) 'x>>=1'
+    done
+    netCIDR=$c
+else
+    localip=$(hostname -I | cut -d" " -f1)
+    # FIXME: in an edge case where neither ifconfig nor iproute2 utils are available
+    #        need to get CIDR some other way
+fi
+
+## FIXME: these values for network and iprange are only valid for /24 CIDRs.
+#         need to update the method if/when custom CIDRs are allowed
+network=$(echo $localip | cut -d"." -f1,2,3)
+iprange=$(echo $network".0/"$netCIDR)
+
+# Determine external IP
+# Try /dev/tcp method first
+httpextip="icanhazip.com"
+conn="'GET / HTTP/1.1\r\nhost: ' $httpextip '\r\n\r\n'"
+response=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$httpextip/80; echo -e $conn>&3; cat<&3" | tail -1)
+
+# If the above method fails, then fallback to builtin utils for this
+if ! valid_ip response; then
+	if test $(which curl); then
+		getip=$(curl -s $httpextip) # whatismyip.akamai.com may be a consistently faster option
+	elif test $(which wget); then
+		getip=$(wget -O- -q $httpextip)
+	elif test $(which dig); then
+		getip=$(dig +short myip.opendns.com @resolver1.opendns.com)
+	elif test $(which telnet); then
+		getip=$(telnet telnetmyip.com 2>/dev/null | grep ^\"ip | cut -d"\"" -f4)
+	elif test $(which ssh); then
+		# Not usually a great idea to disable StrictHostKeyChecking, but
+		# in this case, we aren't doing anything sensitive in the connection.
+		# Leaving it enabled will prompt for confirming key on first connection,
+		# rather than simply returning the output we want
+		getip=$(ssh -o StrictHostKeyChecking=no sshmyip.com 2>/dev/null |  grep ^\"ip | cut -d"\"" -f4)
+	else
+		#We probably have enough methods above to make failure relatively unlikely.
+		#So, if we reach this point, there may be no WAN connectivity.
+		getip="Failed to determine. Host may not have external connectivity."
+	fi
+fi
+
+# Port list
+# Default: Subset of tcp_ports (list from nmap), as specified in $TOP_PORTS
+# Custom:  User input from "-p | --ports" flags, either as a comma-separated list or a range
+if [ -z "$ports" ]; then
+	# TCP ports from the nmap database ordered by frequency of use, stored in nmap-services:
+	# `cat /usr/share/nmap/nmap-services | grep "tcp" | sort -r -k3 | column -t | tr -s " "`
+	tcp_ports=($(cat lib/nmap-services | cut -d" " -f2 | cut -d"/" -f1 | tr $'\n' " "))
+	ports=(${tcp_ports[@]:0:$TOP_PORTS})
+elif [[ -n "$(grep -i , <<< $ports)" ]]; then # is this a comma-separated list of ports? 
+	IFS=',' read -r -a ports <<< $ports # split comma-separated list into array for processing
+	for port in ${ports[@]}; do
+		valid_port $port
+	done
+elif [[ -n "$(grep -i - <<< $ports)" ]]; then # is this a range of ports?
+	# Treat "-p-" case as a request for all ports
+	if [[ "$ports" == "-" ]]; then
+		ports=( $(seq 0 65535) )
+	else
+		IFS='-' read start_port end_port <<< $ports
+		# If all ports in specified range are valid, 
+		# populate ports array with the full list
+		valid_port $start_port && valid_port $end_port
+		ports=( $(seq $start_port $end_port ))
+	fi
+else
+	valid_port $ports
+fi
+
+num_ports=${#ports[@]}
+
+# Determine which pingsweep method(s) will be used
+if test $(which arping); then
+	if [ "$ROOT_CHECK" = true ] && [ "$EUID" != 0 ]; then
+		arp_warning=true
+		SWEEP_METHOD="ICMP"
+	else
+		SWEEP_METHOD="ICMP/ARP"
+	fi
+else
+	SWEEP_METHOD="ICMP"
+fi
+
+# Timing options (initially based on nmap Maximum TCP scan delay settings)
+# nmap values are in milliseconds - converted here for bash sleep in seconds
+case $TIMING in
+	0 )	DELAY=300    ;;
+	1 )	DELAY=15     ;;
+	2 )	DELAY=1      ;;
+	3 )	DELAY=.1     ;;
+	4 )	DELAY=.010   ;;
+	5 )	DELAY=.005   ;;
+	6 )	DELAY=0      ;;
+esac
 
 main
