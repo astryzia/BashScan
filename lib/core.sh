@@ -69,9 +69,9 @@ fi
 # We don't *need* to validate the exclusions as IPs, 
 # since any that fail to match a host in our target 
 # list simply get no further processing. However, 
-# passing the exclusions through populate_targets is 
-# a simple method for expanding ranges, CIDRs, etc.
-# before we make our comparison for removals.
+# passing the exclusions through populate_targets 
+# allows us to consistently expand ranges, CIDRs, etc.
+# the same way we do for adding targets. 
 if [[ -n "$exclude" ]]; then
 	populate_targets $exclude "exclude"
 fi

@@ -28,10 +28,10 @@ Usage:  %s
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
 	[ -T | --timing <0-6> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
-	[ -iL <file.txt> ]        Add list of targets from input file
-	[ -xL <file.txt> ]        Exclude list of targets from input file
-	[ -oN <file.txt> ]        Normal output: similar to interactive output
-	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
+	[ -iL <file> ]            Add list of targets from input file
+	[ -xL <file> ]            Exclude list of targets from input file
+	[ -oN <file> ]            Normal output: similar to interactive output
+	[ -oG <file> ]            Grepable output: comma-delimited, each host on a single line
 	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
@@ -613,9 +613,9 @@ fi
 # We don't *need* to validate the exclusions as IPs, 
 # since any that fail to match a host in our target 
 # list simply get no further processing. However, 
-# passing the exclusions through populate_targets is 
-# a simple method for expanding ranges, CIDRs, etc.
-# before we make our comparison for removals.
+# passing the exclusions through populate_targets 
+# allows us to consistently expand ranges, CIDRs, etc.
+# the same way we do for adding targets. 
 if [[ -n "$exclude" ]]; then
 	populate_targets $exclude "exclude"
 fi
