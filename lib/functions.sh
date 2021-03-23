@@ -41,11 +41,12 @@ resolve_host(){
 	printf "$ip"
 }
 
-# 
 populate_targets(){
 # Global target value set in core.sh
 # set local to avoid clobbering
 local TARGET=$1
+local list_type=$2
+local valid_targets
 
 # If there is a "-" in input, treat as IP range
 # FIXME: currently only handles 4th octet;
@@ -60,7 +61,7 @@ if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
 	if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
 		if [[ "$start_oct4" -lt "$end_oct4" ]]; then
 			for oct4 in $(seq $start_oct4 $end_oct4); do
-				TARGETS+=("$network.$oct4")
+				valid_targets+=("$network.$oct4")
 			done
 		else
 			if [[ -z "$i_file" ]]; then usage; fi
@@ -74,14 +75,14 @@ elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
 	if ! valid_ip "${TARGET%/*}"; then
 		if [[ -z "$i_file" ]]; then usage; fi
 	else
-		TARGETS+=("$(cidr_to_ip $TARGET)")
+		valid_targets+=("$(cidr_to_ip $TARGET)")
 	fi
 # Comma-separated list?
 elif  [[ -n "$(grep -i , <<< $TARGET)" ]]; then
 	read -d ',' -a comma_targets <<< "$TARGET" 
 	for comma_target in ${comma_targets[@]}; do
 		if valid_ip $comma_target; then
-			TARGETS+=($comma_target)
+			valid_targets+=($comma_target)
 		fi
 	done
 else
@@ -90,11 +91,19 @@ else
 	if valid_ip $check_hostname; then
 		TARGET="$check_hostname"
 	elif valid_ip $TARGET; then
-		TARGETS+=("$TARGET")
+		valid_targets+=("$TARGET")
 	# If all checks above fail, treat as invalid input
 	else
 		if [[ -z "$i_file" ]]; then usage; fi
 	fi
+fi
+
+# Copy local array to the appropriate glob, 
+# depending on whether we're adding or excluding
+if [[ "$list_type" == "add" ]]; then
+	TARGETS+=("${valid_targets[@]}")
+elif [[ "$list_type" == "exclude" ]]; then
+	EXCLUSIONS+=("${valid_targets[@]}")
 fi
 }
 

@@ -31,7 +31,7 @@ valid_timing $TIMING
 # Check validity and populate target list
 if [[ -n "$@" ]]; then
 	TARGET=$@
-	populate_targets $TARGET
+	populate_targets $TARGET "add"
 fi
 
 # If an input file was specified, pass that list
@@ -49,7 +49,7 @@ if [[ -n "$i_file" ]]; then
 	# Since target file could potentially contain several
 	# thousand IPs, just use the file name as the target
 	# for reporting 
-	TARGET+="+ $i_file"
+	TARGET+=" + $i_file"
 	OIFS=$IFS
 	IFS=$'\n'
 	read -d '' -r -a file_targets < $i_file
@@ -58,10 +58,47 @@ if [[ -n "$i_file" ]]; then
 		if valid_ip "$file_target"; then
 			TARGETS+=($file_target)
 		else
-			populate_targets $file_target
+			populate_targets $file_target "add"
 		fi
 	done
 fi
+
+# After we've added valid targets to our array, 
+# check to see if we have any exclusions specified.
+# Remove any matching exclusions from the target list.
+# We don't *need* to validate the exclusions as IPs, 
+# since any that fail to match a host in our target 
+# list simply get no further processing. However, 
+# passing the exclusions through populate_targets is 
+# a simple method for expanding ranges, CIDRs, etc.
+# before we make our comparison for removals.
+if [[ -n "$exclude" ]]; then
+	populate_targets $exclude "exclude"
+fi
+
+# In addition to exclusion via direct input on cli,
+# we can accept a list of hosts in file input for 
+# exclusion.
+if [[ -n "$x_file" ]]; then
+	OIFS=$IFS
+	IFS=$'\n'
+	read -d '' -r -a exclusion_targets < $x_file
+	IFS=$OIFS
+	for exclusion_target in ${exclusion_targets[@]}; do
+		if valid_ip "$exclusion_target"; then
+			EXCLUSIONS+=($exclusion_target)
+		else
+			populate_targets $exclusion_targets "exclude"
+		fi
+	done
+fi
+
+# After exclusions from cli and file inputs are 
+# processed, modify the TARGETS array, removing
+# any matches
+for exclusion in ${EXCLUSIONS[@]}; do
+	TARGETS=( ${TARGETS[@]/$exclusion} )
+done
 
 # determine default network interface
 if test $(which route); then
@@ -107,7 +144,9 @@ conn="'GET / HTTP/1.1\r\nhost: ' $httpextip '\r\n\r\n'"
 response=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$httpextip/80; echo -e $conn>&3; cat<&3" | tail -1)
 
 # If the above method fails, then fallback to builtin utils for this
-if ! valid_ip response; then
+if valid_ip response; then
+	getip=$reponse
+else
 	if test $(which curl); then
 		getip=$(curl -s $httpextip) # whatismyip.akamai.com may be a consistently faster option
 	elif test $(which wget); then
