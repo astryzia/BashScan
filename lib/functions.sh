@@ -41,6 +41,62 @@ resolve_host(){
 	printf "$ip"
 }
 
+# 
+populate_targets(){
+# Global target value set in core.sh
+# set local to avoid clobbering
+local TARGET=$1
+
+# If there is a "-" in input, treat as IP range
+# FIXME: currently only handles 4th octet;
+#        add support for ranges in all 4 octets
+if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
+	IFS='-' read start_ip end_oct4 <<< $TARGET
+	network=$(echo $start_ip | cut -d"." -f1,2,3)
+	end_ip=$network.$end_oct4
+	start_oct4=$(echo $start_ip | cut -d"." -f4)
+	# If the beginning and ending IPs specified are 
+	# valid, assign all addresses in range to TARGETS array
+	if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
+		if [[ "$start_oct4" -lt "$end_oct4" ]]; then
+			for oct4 in $(seq $start_oct4 $end_oct4); do
+				TARGETS+=("$network.$oct4")
+			done
+		else
+			if [[ -z "$i_file" ]]; then usage; fi
+		fi
+	else
+		if [[ -z "$i_file" ]]; then usage; fi
+	fi
+# If there is a "/" in the input, treat as CIDR
+elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
+	# Sanity check base IP specified is valid
+	if ! valid_ip "${TARGET%/*}"; then
+		if [[ -z "$i_file" ]]; then usage; fi
+	else
+		TARGETS+=("$(cidr_to_ip $TARGET)")
+	fi
+# Comma-separated list?
+elif  [[ -n "$(grep -i , <<< $TARGET)" ]]; then
+	read -d ',' -a comma_targets <<< "$TARGET" 
+	for comma_target in ${comma_targets[@]}; do
+		if valid_ip $comma_target; then
+			TARGETS+=($comma_target)
+		fi
+	done
+else
+	# Is this a valid hostname?
+	check_hostname=$(resolve_host $TARGET)
+	if valid_ip $check_hostname; then
+		TARGET="$check_hostname"
+	elif valid_ip $TARGET; then
+		TARGETS+=("$TARGET")
+	# If all checks above fail, treat as invalid input
+	else
+		if [[ -z "$i_file" ]]; then usage; fi
+	fi
+fi
+}
 
 ########################################
 # Scanning functions
@@ -76,10 +132,18 @@ pingsweep(){
 			pingcheck "$ip"
 		done;
 	else
-		for ip in {1..254}; do
-			TARGET="$network.$ip"
-			pingcheck "$TARGET"
-		done;
+		# If user originally specified a target, 
+		# either via cli or file input, and none of the
+		# targets validated, we should let them know that
+		# rather than failing over to our default scan
+		if [[ -n "$TARGET" ]]; then
+			printf ""
+		else
+			for ip in {1..254}; do
+				TARGET="$network.$ip"
+				pingcheck "$TARGET"
+			done;
+		fi
 	fi
 }
 
@@ -93,7 +157,7 @@ portscan(){
 		scan+="sleep $DELAY; (echo >/dev/tcp/$host/$port) >& /dev/null#"
 	done;
 
-	# Caveat: this function really speeds up the scans, but
+	# FIXME: ParallelExec really speeds up the scans, but
 	# it also somewhat breaks the Timing settings. Need more
 	# thought on how best to implement timing in a parallelized 
 	# workload. $num_processes is defined in core.sh, based on 
@@ -102,7 +166,7 @@ portscan(){
 	LIVEPORTS=( $(ParallelExec "$num_processes" "$scan"))
 	count_liveports=${#LIVEPORTS[@]}
 
-	# Do this only for live ports to save time
+	# Grab banners only for live ports to save time
 	# Not currently parallel - consider adding for perf increase
 	if [ "$BANNER" = true ]; then
 		for port in ${LIVEPORTS[@]}; do
@@ -262,7 +326,7 @@ main(){
 	printf "Default Interface:\t%s\n" $default_interface
 
 	if [ -n "$TARGET" ]; then
-		printf "Target:\t\t\t%s\n" $TARGET
+		printf "Target:\t\t\t%s\n" "$TARGET"
 	fi
 
 	if [ "$arp_warning" = true ]; then
@@ -271,13 +335,7 @@ main(){
 
 	printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
 
-	# Single ping for custom target, otherwise sweep
-	if [ -n "$TARGET" ] && [ -z "$TARGETS" ]; then
-		LIVEHOSTS=($(pingcheck $TARGET | sort -V | uniq ))
-	else
-		LIVEHOSTS=($(pingsweep | sort -V | uniq))
-	fi
-
+	LIVEHOSTS=($(pingsweep | sort -V | uniq))
 	num_hosts=${#LIVEHOSTS[@]}
 
 	if [ "$num_hosts" -gt 0 ]; then

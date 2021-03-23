@@ -27,6 +27,7 @@ Usage:  %s
 	[ -t | --top-ports <1+> ] Specify number of top TCP ports to scan (default = 20 )
 	[ -T | --timing <0-6> ]   Timing template (default = 4)
 	[ -v | --version ]        Print version and exit.
+	[ -iL <file.txt> ]        Read list of targets from input file
 	[ -oN <file.txt> ]        Normal output: similar to interactive output
 	[ -oG <file.txt> ]        Grepable output: comma-delimited, each host on a single line
 	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME

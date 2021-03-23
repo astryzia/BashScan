@@ -6,7 +6,7 @@
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
 	-o bhop:rt:T:v \
-	-l banner,help,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
+	-l banner,help,iL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -14,20 +14,21 @@ if [ "$VALID_ARGUMENTS" != "0" ]; then
   usage
 fi
 
-# for file output options, we mimic the familiar format of nmap, 
-# using -oG, -oN, etc; note: the "-a" option above allows use of
+# Aligning flags with nmap syntax where possible to flatten the
+# learning curve. Note: the "-a" option above allows use of
 # a single dash for "long" options in addition to double dash; 
 # since getopt doesn't support a multi-char "short" option, this 
-# is one workaround. also, the "short" options for output aren't
-# used (no associated chars in the "-o" string above), but getopt 
-# doesn't work if nothing is present in the short fields for the 
-# case statement, so we use placeholders "~" here
+# is one workaround for double letter flags (-iL/-oN/-oG, etc.). 
+# In cases where the "short" options for output aren't used 
+# (no associated chars in the "-o" string above), we use placeholder
+# chars, like "~". 
 eval set -- "$PARSED_ARGUMENTS"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-b  | --banner      ) BANNER=true               ; shift 1 ;;
+		-~  | --iL          ) i_file="$2"               ; shift 2 ;;
 		-~  | --oG          ) g_file="$2"               ; shift 2 ;; 
-		-~ 	| --oN          ) n_file="$2"               ; shift 2 ;;
+		-~  | --oN          ) n_file="$2"               ; shift 2 ;;
 		-o  | --open        ) OPEN=true                 ; shift 1 ;;
 		-p  | --ports       ) ports="$2"                ; shift 2 ;;
 		-t  | --top-ports   ) TOP_PORTS="$2"            ; shift 2 ;;
