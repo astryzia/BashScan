@@ -116,6 +116,7 @@ fi
 if test $(which ip); then
 	localaddr=$(ip -o -4 addr show $default_interface | tr -s " " | cut -d" " -f4)
 	IFS=/ read localip netCIDR <<< $localaddr
+	network=$(cidr2network $localip $netCIDR)
 elif test $(which ifconfig); then
     localaddr=$(ifconfig $default_interface | grep -Eo '(addr:)?([0-9]*\.){3}[0-9]*')
     localip=$(cut -d$'\n' -f1 <<< $localaddr)
@@ -126,16 +127,14 @@ elif test $(which ifconfig); then
       	let c+=$((x%2)) 'x>>=1'
     done
     netCIDR=$c
+    network=$(cidr2network $localip $netCIDR)
 else
     localip=$(hostname -I | cut -d" " -f1)
     # FIXME: in an edge case where neither ifconfig nor iproute2 utils are available
-    #        need to get CIDR some other way
+    #        need to get CIDR/netmask some other way
 fi
 
-## FIXME: these values for network and iprange are only valid for /24 CIDRs.
-#         need to update the method if/when custom CIDRs are allowed
-network=$(echo $localip | cut -d"." -f1,2,3)
-iprange=$(echo $network".0/"$netCIDR)
+iprange=$(printf %s/%s $network $netCIDR)
 
 # Determine external IP
 # Try /dev/tcp method first

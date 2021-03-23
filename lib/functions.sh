@@ -2,10 +2,26 @@
 # Utility functions
 ########################################
 
+ip2int(){
+    local a b c d
+    { IFS=. read a b c d; } <<< $1
+    echo $(((((((a << 8) | b) << 8) | c) << 8) | d))
+}
+
+int2ip(){
+    local ui32=$1; shift
+    local ip n
+    for n in 1 2 3 4; do
+        ip=$((ui32 & 0xff))${ip:+.}$ip
+        ui32=$((ui32 >> 8))
+    done
+    echo $ip
+}
+
 # Takes as input IP + CIDR (ex: 192.168.1.0/24)
 # Converts CIDR to list of IPs
 # Limited to /8 max 
-cidr_to_ip() {
+cidr2ip() {
 	local base=${1%/*}
 	local masksize=${1#*/}
 
@@ -23,6 +39,19 @@ cidr_to_ip() {
 	seq $ipstart $ipend | while read i; do
     	printf "$a.$(( ($i & 0xFF0000) >> 16 )).$(( ($i & 0xFF00) >> 8 )).$(( $i & 0x00FF )) "
 	done 
+}
+
+# Example: cidr2netmask 24 => 255.255.255.0
+cidr2netmask(){
+    local mask=$((0xffffffff << (32 - $1))); shift
+    int2ip $mask
+}
+
+# Example: cidr2network 192.168.19.24 16 => 192.168.0.0
+cidr2network(){
+    local addr=$(ip2int $1)
+    local mask=$((0xffffffff << (32 -$2)))
+    int2ip $((addr & mask))
 }
 
 # Input: hostname
@@ -75,7 +104,7 @@ elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
 	if ! valid_ip "${TARGET%/*}"; then
 		if [[ -z "$i_file" ]]; then usage; fi
 	else
-		valid_targets+=("$(cidr_to_ip $TARGET)")
+		valid_targets+=("$(cidr2ip $TARGET)")
 	fi
 # Comma-separated list?
 elif  [[ -n "$(grep -i , <<< $TARGET)" ]]; then
@@ -147,10 +176,11 @@ pingsweep(){
 		# rather than failing over to our default scan
 		if [[ -n "$TARGET" ]]; then
 			printf ""
+		# Default case - no user supplied targets
 		else
-			for ip in {1..254}; do
-				TARGET="$network.$ip"
-				pingcheck "$TARGET"
+			TARGETS+=($(cidr2ip "$localip/$netCIDR"))
+			for ip in ${TARGETS[@]}; do
+				pingcheck "$ip"
 			done;
 		fi
 	fi
