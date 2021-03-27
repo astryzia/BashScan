@@ -20,7 +20,7 @@ usage() {
 	printf "No nmap only bash /dev/tcp go brrrrrrrrrrrrrrrrr
 Usage:  %s
 	[ -b | --banner ]         Attempt to grab banner during port scanning
-	[ -e | --exclude]        Exclude targets from scan
+	[ -e | --exclude ]        Exclude targets from scan
 	[ -h | --help ]           Show this help message and exit.
 	[ -o | --open ]           Only show targets with open ports
 	[ -p | --ports <PORTS> ]  Comma-separated list or range of integers up to 65535.
