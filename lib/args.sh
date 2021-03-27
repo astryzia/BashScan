@@ -6,7 +6,7 @@
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
 	-o be:hop:rt:T:v \
-	-l banner,exclude:,help,iL:,xL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
+	-l banner,exclude:,help,iL:,xL:,oG:,oN:,Pn,open,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -31,6 +31,7 @@ while [ $# -gt 0 ]; do
 		-~  | --xL          ) x_file="$2"               ; shift 2 ;;
 		-~  | --oG          ) g_file="$2"               ; shift 2 ;; 
 		-~  | --oN          ) n_file="$2"               ; shift 2 ;;
+		-~  | --Pn          ) DO_PING=false             ; shift 1 ;;
 		-o  | --open        ) OPEN=true                 ; shift 1 ;;
 		-p  | --ports       ) ports="$2"                ; shift 2 ;;
 		-t  | --top-ports   ) TOP_PORTS="$2"            ; shift 2 ;;

@@ -6,6 +6,7 @@
 : ${TIMING:=4}
 : ${TOP_PORTS:=20}
 : ${OPEN:=false}
+: ${DO_PING:=true}
 
 ########################################
 # Determine values in prep for scanning
