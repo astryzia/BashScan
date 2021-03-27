@@ -164,6 +164,20 @@ pingsweep(){
 	done
 }
 
+# Avg round trip time to target in seconds
+# Note: ICMP latency is going to be different than
+#       TCP latency, but this is a workable starting point
+latency(){
+	# Any interval shorter than 200 milliseconds is considered 
+	# a "ping flood" and requires root privileges. 
+	ms="$(ping -c 3 -i 0.2 $1 | tail -1 | grep rtt | cut -d"/" -f5)"
+	if [[ -n "$ms" ]]; then
+		printf "0"$( echo "scale=5; (( $ms / 1000 ))" | bc )
+	else
+		printf ""
+	fi
+}
+
 # Scan ports
 portscan(){
 	scan=""
@@ -217,6 +231,13 @@ grepable_output(){
 
 normal_output(){
 	printf "Scan report for %s (%s):\n" $name $host
+
+	if [[ -n "$latency" ]]; then
+		printf "Host is up (%ss latency)\n" $latency
+	else
+		printf "Host seems down\n"
+	fi
+
 	closed_ports=$(($num_ports-$count_liveports))
 	if [ "$closed_ports" -lt "$num_ports" ]; then
 		if [ "$closed_ports" -gt 0 ]; then
@@ -399,6 +420,7 @@ main(){
 
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
+		latency="$(latency $host)"
 		portscan $host
 
 		# If we specify -o flag, only print results if one or more

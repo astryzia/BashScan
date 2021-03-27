@@ -32,6 +32,7 @@ Usage:  %s
 	[ -xL <file> ]            Exclude list of targets from input file
 	[ -oN <file> ]            Normal output: similar to interactive output
 	[ -oG <file> ]            Grepable output: comma-delimited, each host on a single line
+	[ -Pn ]                   No ping; Skip host discovery and go directly to port scanning
 	<x.x.x.[x|x-y|x/24]>      Target IP (optional), as single, range, or CIDR\n\n" $PROGNAME
 	exit 0
 }
@@ -44,7 +45,7 @@ Usage:  %s
 PARSED_ARGUMENTS=$(getopt -n $PROGNAME \
 	-a \
 	-o be:hop:rt:T:v \
-	-l banner,exclude:,help,iL:,xL:,oG:,oN:,open,ports:,root,timing:,top-ports:,version \
+	-l banner,exclude:,help,iL:,xL:,oG:,oN:,Pn,open,ports:,root,timing:,top-ports:,version \
 	-- "$@")
 VALID_ARGUMENTS=$?
 
@@ -69,6 +70,7 @@ while [ $# -gt 0 ]; do
 		-~  | --xL          ) x_file="$2"               ; shift 2 ;;
 		-~  | --oG          ) g_file="$2"               ; shift 2 ;; 
 		-~  | --oN          ) n_file="$2"               ; shift 2 ;;
+		-~  | --Pn          ) DO_PING=false             ; shift 1 ;;
 		-o  | --open        ) OPEN=true                 ; shift 1 ;;
 		-p  | --ports       ) ports="$2"                ; shift 2 ;;
 		-t  | --top-ports   ) TOP_PORTS="$2"            ; shift 2 ;;
@@ -288,37 +290,29 @@ banners(){
 	fi
 }
 
-# Check single TARGET for response before port scanning
-pingcheck(){
-	TARGET=$1
-	if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
-		arping -c 1 -w 1 -I $default_interface $TARGET 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
-	fi
-	# Added stderr redirection to catch ping warning for broadcast address
-	# Adding "-b" would enable pinging broadcast, but I doubt that's what we want
-	ping -c 1 -W 1 $TARGET 2>/dev/null | tr \\n " " | awk '/1 received/ {print $2}' &
+# Ping each host in global TARGETS array
+pingsweep(){
+	for ip in ${TARGETS[@]}; do
+		if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
+			arping -c 1 -w 1 -I $default_interface $ip 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
+		fi
+		# Added stderr redirection to catch ping warning for broadcast address
+		# Adding "-b" would enable pinging broadcast, but I doubt that's what we want
+		ping -c 1 -W 1 $ip 2>/dev/null | tr \\n " " | awk '/1 received/ {print $2}' &
+	done
 }
 
-# Ping multiple hosts
-pingsweep(){
-	if [ -n "$TARGETS" ]; then
-		for ip in ${TARGETS[@]}; do
-			pingcheck "$ip"
-		done;
+# Avg round trip time to target in seconds
+# Note: ICMP latency is going to be different than
+#       TCP latency, but this is a workable starting point
+latency(){
+	# Any interval shorter than 200 milliseconds is considered 
+	# a "ping flood" and requires root privileges. 
+	ms="$(ping -c 3 -i 0.2 $1 | tail -1 | grep rtt | cut -d"/" -f5)"
+	if [[ -n "$ms" ]]; then
+		printf "0"$( echo "scale=5; (( $ms / 1000 ))" | bc )
 	else
-		# If user originally specified a target, 
-		# either via cli or file input, and none of the
-		# targets validated, we should let them know that
-		# rather than failing over to our default scan
-		if [[ -n "$TARGET" ]]; then
-			printf ""
-		# Default case - no user supplied targets
-		else
-			TARGETS+=($(cidr2ip "$localip/$netCIDR"))
-			for ip in ${TARGETS[@]}; do
-				pingcheck "$ip"
-			done;
-		fi
+		printf ""
 	fi
 }
 
@@ -375,6 +369,13 @@ grepable_output(){
 
 normal_output(){
 	printf "Scan report for %s (%s):\n" $name $host
+
+	if [[ -n "$latency" ]]; then
+		printf "Host is up (%ss latency)\n" $latency
+	else
+		printf "Host seems down\n"
+	fi
+
 	closed_ports=$(($num_ports-$count_liveports))
 	if [ "$closed_ports" -lt "$num_ports" ]; then
 		if [ "$closed_ports" -gt 0 ]; then
@@ -504,20 +505,45 @@ main(){
 		printf "Target:\t\t\t%s\n" "$TARGET"
 	fi
 
-	if [ "$arp_warning" = true ]; then
-		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+	# If user hasn't supplied any targets, handle default
+	# case by assigning localip range to TARGETS array
+	# NOTE: test for $i_file to avoid rolling into a default
+	#       network scan in cases where the input file 
+	#       contained no valid/live hosts
+	if [[ -z "$TARGETS" ]] && [[ -z "$i_file" ]]; then
+		TARGETS+=($(cidr2ip "$localip/$netCIDR"))
 	fi
 
-	printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
+	if [[ "$DO_PING" = true ]]; then
+		if [ "$arp_warning" = true ]; then
+			printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+		fi
+		printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
 
-	LIVEHOSTS=($(pingsweep | sort -V | uniq))
+		LIVEHOSTS=($(pingsweep | sort -V | uniq))
+	else
+		# In this case, we aren't pinging to populate a list
+		# of "live" hosts... just copy the TARGETS array to
+		# LIVEHOSTS and start port scanning that.
+		printf "\n[-] Host discovery disabled\n"
+		#printf "[*] Warning: This can potentially be very slow over large ranges of targets/ports\n"
+		#printf "[*] Note: Output for hosts with no open ports can be disabled with [ -o | --open ]\n"
+		LIVEHOSTS+=("${TARGETS[@]}")
+	fi
+
 	num_hosts=${#LIVEHOSTS[@]}
 
-	if [ "$num_hosts" -gt 0 ]; then
-		printf "[+] $num_hosts %s found\n[+] Beginning scan of %s total %s\n\n" $(plural $num_hosts host) $num_ports $(plural $num_ports port)
-		portscan | sort -V | uniq
-	else
+	if [ "$num_hosts" -eq 0 ]; then
 		printf "[+] No responsive hosts found\n\n"
+	else
+		# Adjust stdout verbiage depending on whether host
+		# discovery is enabled or disabled
+		if [[ "$DO_PING" = true ]]; then
+			printf "[+] $num_hosts %s found\n" $(plural $num_hosts host) 
+		fi
+			printf "[+] Beginning scan of %s %s on %s %s\n\n" $num_ports $(plural $num_ports "port") $num_hosts $(plural $num_hosts "target")
+			portscan | sort -V | uniq
+		
 	fi
 
 	datestart_file=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%c")
@@ -532,6 +558,7 @@ main(){
 
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
+		latency="$(latency $host)"
 		portscan $host
 
 		# If we specify -o flag, only print results if one or more
@@ -580,6 +607,7 @@ main(){
 : ${TIMING:=4}
 : ${TOP_PORTS:=20}
 : ${OPEN:=false}
+: ${DO_PING:=true}
 
 ########################################
 # Determine values in prep for scanning
