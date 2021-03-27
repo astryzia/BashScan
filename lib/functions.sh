@@ -232,9 +232,11 @@ grepable_output(){
 normal_output(){
 	printf "Scan report for %s (%s):\n" $name $host
 
+	# If we have a latency value, host is up
 	if [[ -n "$latency" ]]; then
 		printf "Host is up (%ss latency)\n" $latency
-	else
+	# Only report down if we haven't disabled ping
+	elif [[ "$DO_PING" = true ]]; then
 		printf "Host seems down\n"
 	fi
 
@@ -420,7 +422,13 @@ main(){
 
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
-		latency="$(latency $host)"
+		# Usually, the only reason ping will be disabled is because
+		# ICMP is being dropped/blocked. In this case, our latency
+		# method won't work either, so only attempt latency measure
+		# if we can ping. 
+		if [[ "$DO_PING" = true ]]; then
+			latency="$(latency $host)"
+		fi
 		portscan $host
 
 		# If we specify -o flag, only print results if one or more
