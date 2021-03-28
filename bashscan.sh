@@ -115,6 +115,20 @@ valid_ip(){
     return $stat
 }
 
+valid_octet(){
+    octet=$1 
+    if [[ -n "$(grep -i - <<< $octet)" ]]; then
+        IFS='-' read start_octet end_octet <<< $octet
+        if (( 0 < $start_octet < 255 )) && (( 1 < $end_octet <= 255 )) && (( $start_octet <= $end_octet )); then
+            printf "$(seq $start_octet $end_octet)"
+        else
+            if [[ -z "$i_file" ]]; then usage; fi
+        fi
+    else
+        printf "$octet"
+    fi
+}
+
 # Validate timing flag is in range
 valid_timing(){
 	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
@@ -147,7 +161,7 @@ ip2int(){
 }
 
 int2ip(){
-    local ui32=$1; shift
+    local ui32=$1
     local ip n
     for n in 1 2 3 4; do
         ip=$((ui32 & 0xff))${ip:+.}$ip
@@ -216,33 +230,32 @@ local list_type=$2
 local valid_targets
 
 # If there is a "-" in input, treat as IP range
-# FIXME: currently only handles 4th octet;
-#        add support for ranges in all 4 octets
 if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
-	IFS='-' read start_ip end_oct4 <<< $TARGET
-	network=$(echo $start_ip | cut -d"." -f1,2,3)
-	end_ip=$network.$end_oct4
-	start_oct4=$(echo $start_ip | cut -d"." -f4)
-	# If the beginning and ending IPs specified are 
-	# valid, assign all addresses in range to TARGETS array
-	if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
-		if [[ "$start_oct4" -lt "$end_oct4" ]]; then
-			for oct4 in $(seq $start_oct4 $end_oct4); do
-				valid_targets+=("$network.$oct4")
+	IFS=. read oct1 oct2 oct3 oct4 <<< $TARGET
+	# There probably isn't a need to scan class d/e 
+	# networks, so we could cap the 1st octet at 223;
+	# For the sake of simplicity, we use the same 
+	# validation check in all 4 octets, with max=255
+	oct1=("$(valid_octet $oct1)")
+	oct2=("$(valid_octet $oct2)")
+	oct3=("$(valid_octet $oct3)")
+	oct4=("$(valid_octet $oct4)")
+	for a in $oct1; do
+		for b in $oct2; do
+			for c in $oct3; do
+				for d in $oct4; do
+					valid_targets+=("$a"."$b"."$c"."$d")
+				done
 			done
-		else
-			if [[ -z "$i_file" ]]; then usage; fi
-		fi
-	else
-		if [[ -z "$i_file" ]]; then usage; fi
-	fi
+		done
+	done
 # If there is a "/" in the input, treat as CIDR
 elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
 	# Sanity check base IP specified is valid
 	if ! valid_ip "${TARGET%/*}"; then
 		if [[ -z "$i_file" ]]; then usage; fi
 	else
-		valid_targets+=("$(cidr2ip $TARGET)")
+		valid_targets+=($(cidr2ip $TARGET))
 	fi
 # Comma-separated list?
 elif  [[ -n "$(grep -i , <<< $TARGET)" ]]; then
@@ -516,11 +529,13 @@ main(){
 		TARGETS+=($(cidr2ip "$localip/$netCIDR"))
 	fi
 
+	num_targets="${#TARGETS[@]}"
+
 	if [[ "$DO_PING" = true ]]; then
 		if [ "$arp_warning" = true ]; then
 			printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
 		fi
-		printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
+		printf "\n[+] Sweeping %s %s for live hosts (%s%s%s)\n" $num_targets $(plural $num_targets "target") $SWEEP_METHOD
 
 		LIVEHOSTS=($(pingsweep | sort -V | uniq))
 	else
