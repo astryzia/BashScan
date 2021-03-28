@@ -9,7 +9,7 @@ ip2int(){
 }
 
 int2ip(){
-    local ui32=$1; shift
+    local ui32=$1
     local ip n
     for n in 1 2 3 4; do
         ip=$((ui32 & 0xff))${ip:+.}$ip
@@ -78,33 +78,32 @@ local list_type=$2
 local valid_targets
 
 # If there is a "-" in input, treat as IP range
-# FIXME: currently only handles 4th octet;
-#        add support for ranges in all 4 octets
 if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
-	IFS='-' read start_ip end_oct4 <<< $TARGET
-	network=$(echo $start_ip | cut -d"." -f1,2,3)
-	end_ip=$network.$end_oct4
-	start_oct4=$(echo $start_ip | cut -d"." -f4)
-	# If the beginning and ending IPs specified are 
-	# valid, assign all addresses in range to TARGETS array
-	if valid_ip "$start_ip" && valid_ip "$end_ip"; then	
-		if [[ "$start_oct4" -lt "$end_oct4" ]]; then
-			for oct4 in $(seq $start_oct4 $end_oct4); do
-				valid_targets+=("$network.$oct4")
+	IFS=. read oct1 oct2 oct3 oct4 <<< $TARGET
+	# There probably isn't a need to scan class d/e 
+	# networks, so we could cap the 1st octet at 223;
+	# For the sake of simplicity, we use the same 
+	# validation check in all 4 octets, with max=255
+	oct1=("$(valid_octet $oct1)")
+	oct2=("$(valid_octet $oct2)")
+	oct3=("$(valid_octet $oct3)")
+	oct4=("$(valid_octet $oct4)")
+	for a in $oct1; do
+		for b in $oct2; do
+			for c in $oct3; do
+				for d in $oct4; do
+					valid_targets+=("$a"."$b"."$c"."$d")
+				done
 			done
-		else
-			if [[ -z "$i_file" ]]; then usage; fi
-		fi
-	else
-		if [[ -z "$i_file" ]]; then usage; fi
-	fi
+		done
+	done
 # If there is a "/" in the input, treat as CIDR
 elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
 	# Sanity check base IP specified is valid
 	if ! valid_ip "${TARGET%/*}"; then
 		if [[ -z "$i_file" ]]; then usage; fi
 	else
-		valid_targets+=("$(cidr2ip $TARGET)")
+		valid_targets+=($(cidr2ip $TARGET))
 	fi
 # Comma-separated list?
 elif  [[ -n "$(grep -i , <<< $TARGET)" ]]; then
@@ -152,37 +151,29 @@ banners(){
 	fi
 }
 
-# Check single TARGET for response before port scanning
-pingcheck(){
-	TARGET=$1
-	if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
-		arping -c 1 -w 1 -I $default_interface $TARGET 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
-	fi
-	# Added stderr redirection to catch ping warning for broadcast address
-	# Adding "-b" would enable pinging broadcast, but I doubt that's what we want
-	ping -c 1 -W 1 $TARGET 2>/dev/null | tr \\n " " | awk '/1 received/ {print $2}' &
+# Ping each host in global TARGETS array
+pingsweep(){
+	for ip in ${TARGETS[@]}; do
+		if [ "$SWEEP_METHOD" == "ICMP + ARP" ]; then
+			arping -c 1 -w 1 -I $default_interface $ip 2>/dev/null | tr \\n " " | awk '/1 from/ {print $2}' &
+		fi
+		# Added stderr redirection to catch ping warning for broadcast address
+		# Adding "-b" would enable pinging broadcast, but I doubt that's what we want
+		ping -c 1 -W 1 $ip 2>/dev/null | tr \\n " " | awk '/1 received/ {print $2}' &
+	done
 }
 
-# Ping multiple hosts
-pingsweep(){
-	if [ -n "$TARGETS" ]; then
-		for ip in ${TARGETS[@]}; do
-			pingcheck "$ip"
-		done;
+# Avg round trip time to target in seconds
+# Note: ICMP latency is going to be different than
+#       TCP latency, but this is a workable starting point
+latency(){
+	# Any interval shorter than 200 milliseconds is considered 
+	# a "ping flood" and requires root privileges. 
+	ms="$(ping -c 3 -i 0.2 $1 | tail -1 | grep rtt | cut -d"/" -f5)"
+	if [[ -n "$ms" ]]; then
+		printf "0"$( echo "scale=5; (( $ms / 1000 ))" | bc )
 	else
-		# If user originally specified a target, 
-		# either via cli or file input, and none of the
-		# targets validated, we should let them know that
-		# rather than failing over to our default scan
-		if [[ -n "$TARGET" ]]; then
-			printf ""
-		# Default case - no user supplied targets
-		else
-			TARGETS+=($(cidr2ip "$localip/$netCIDR"))
-			for ip in ${TARGETS[@]}; do
-				pingcheck "$ip"
-			done;
-		fi
+		printf ""
 	fi
 }
 
@@ -239,6 +230,15 @@ grepable_output(){
 
 normal_output(){
 	printf "Scan report for %s (%s):\n" $name $host
+
+	# If we have a latency value, host is up
+	if [[ -n "$latency" ]]; then
+		printf "Host is up (%ss latency)\n" $latency
+	# Only report down if we haven't disabled ping
+	elif [[ "$DO_PING" = true ]]; then
+		printf "Host seems down\n"
+	fi
+
 	closed_ports=$(($num_ports-$count_liveports))
 	if [ "$closed_ports" -lt "$num_ports" ]; then
 		if [ "$closed_ports" -gt 0 ]; then
@@ -368,20 +368,47 @@ main(){
 		printf "Target:\t\t\t%s\n" "$TARGET"
 	fi
 
-	if [ "$arp_warning" = true ]; then
-		printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+	# If user hasn't supplied any targets, handle default
+	# case by assigning localip range to TARGETS array
+	# NOTE: test for $i_file to avoid rolling into a default
+	#       network scan in cases where the input file 
+	#       contained no valid/live hosts
+	if [[ -z "$TARGETS" ]] && [[ -z "$i_file" ]]; then
+		TARGETS+=($(cidr2ip "$localip/$netCIDR"))
 	fi
 
-	printf "\n[+] Sweeping for live hosts (%s%s%s)\n" $SWEEP_METHOD
+	num_targets="${#TARGETS[@]}"
 
-	LIVEHOSTS=($(pingsweep | sort -V | uniq))
+	if [[ "$DO_PING" = true ]]; then
+		if [ "$arp_warning" = true ]; then
+			printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+		fi
+		printf "\n[+] Sweeping %s %s for live hosts (%s%s%s)\n" $num_targets $(plural $num_targets "target") $SWEEP_METHOD
+
+		LIVEHOSTS=($(pingsweep | sort -V | uniq))
+	else
+		# In this case, we aren't pinging to populate a list
+		# of "live" hosts... just copy the TARGETS array to
+		# LIVEHOSTS and start port scanning that.
+		printf "\n[-] Host discovery disabled\n"
+		#printf "[*] Warning: This can potentially be very slow over large ranges of targets/ports\n"
+		#printf "[*] Note: Output for hosts with no open ports can be disabled with [ -o | --open ]\n"
+		LIVEHOSTS+=("${TARGETS[@]}")
+	fi
+
 	num_hosts=${#LIVEHOSTS[@]}
 
-	if [ "$num_hosts" -gt 0 ]; then
-		printf "[+] $num_hosts %s found\n[+] Beginning scan of %s total %s\n\n" $(plural $num_hosts host) $num_ports $(plural $num_ports port)
-		portscan | sort -V | uniq
-	else
+	if [ "$num_hosts" -eq 0 ]; then
 		printf "[+] No responsive hosts found\n\n"
+	else
+		# Adjust stdout verbiage depending on whether host
+		# discovery is enabled or disabled
+		if [[ "$DO_PING" = true ]]; then
+			printf "[+] $num_hosts %s found\n" $(plural $num_hosts host) 
+		fi
+			printf "[+] Beginning scan of %s %s on %s %s\n\n" $num_ports $(plural $num_ports "port") $num_hosts $(plural $num_hosts "target")
+			portscan | sort -V | uniq
+		
 	fi
 
 	datestart_file=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%c")
@@ -396,6 +423,13 @@ main(){
 
 	for host in ${LIVEHOSTS[@]}; do
 		name=$(revdns $host)
+		# Usually, the only reason ping will be disabled is because
+		# ICMP is being dropped/blocked. In this case, our latency
+		# method won't work either, so only attempt latency measure
+		# if we can ping. 
+		if [[ "$DO_PING" = true ]]; then
+			latency="$(latency $host)"
+		fi
 		portscan $host
 
 		# If we specify -o flag, only print results if one or more
