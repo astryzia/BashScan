@@ -70,6 +70,21 @@ resolve_host(){
 	printf "$ip"
 }
 
+parse_octet(){
+    local octet=$1
+    if [[ -n "$(grep -i - <<< $octet)" ]]; then
+        IFS='-' read start_octet end_octet <<< $octet
+        if (( "$start_octet" < 255 )) && (( "$end_octet" <= 255 )) && [ "$start_octet" -lt "$end_octet" ]; then
+            printf "$(seq $start_octet $end_octet)"
+        fi
+    else
+    	# If input isn't range, print if it is an integer
+        if [ "$1" -eq "$1" ] 2>/dev/null; then
+        	printf "$octet"
+        fi
+    fi
+}
+
 populate_targets(){
 # Global target value set in core.sh
 # set local to avoid clobbering
@@ -79,24 +94,29 @@ local valid_targets
 
 # If there is a "-" in input, treat as IP range
 if [[ -n "$(grep -i - <<< $TARGET)" ]]; then
-	IFS=. read oct1 oct2 oct3 oct4 <<< $TARGET
+	IFS=. read o1 o2 o3 o4 <<< $TARGET
 	# There probably isn't a need to scan class d/e 
 	# networks, so we could cap the 1st octet at 223;
 	# For the sake of simplicity, we use the same 
 	# validation check in all 4 octets, with max=255
-	oct1=("$(valid_octet $oct1)")
-	oct2=("$(valid_octet $oct2)")
-	oct3=("$(valid_octet $oct3)")
-	oct4=("$(valid_octet $oct4)")
-	for a in $oct1; do
-		for b in $oct2; do
-			for c in $oct3; do
-				for d in $oct4; do
-					valid_targets+=("$a"."$b"."$c"."$d")
+	oct1=("$(parse_octet $o1)")
+	oct2=("$(parse_octet $o2)")
+	oct3=("$(parse_octet $o3)")
+	oct4=("$(parse_octet $o4)")
+
+	if [[ -z ${oct1[*]} ]] || [[ -z ${oct2[*]} ]] || [[ -z ${oct3[*]} ]] || [[ -z ${oct4[*]} ]]; then
+		if [[ -z "$i_file" ]]; then usage; fi
+	else
+		for a in $oct1; do
+			for b in $oct2; do
+				for c in $oct3; do
+					for d in $oct4; do
+						valid_targets+=("$a"."$b"."$c"."$d")
+					done
 				done
 			done
 		done
-	done
+	fi
 # If there is a "/" in the input, treat as CIDR
 elif [[ -n "$(grep -i / <<< $TARGET)" ]]; then
 	# Sanity check base IP specified is valid
@@ -143,9 +163,26 @@ fi
 banners(){
 	host="$1"
 	port="$2"
-	# Trimmed out all but first line of response to clean up long http replies
-	# Also removed trailing \r which is common in http responses
-	banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo "">&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
+
+	service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
+
+	# Eventually, this case statement may scale to a 
+	# point where a different approach is more readable; 
+	# For now, this should work as a poc. 
+	case $service in
+		# For http services, we usually need to echo in
+		# a formatted request in order to get a server
+		# banner in response; 
+		"http" | "https" | "http-proxy" |  "http-alt" | "https-alt" )
+			conn="'GET / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
+			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -iav "mismatch" | grep -i "server:")
+			;;
+		*)
+			conn=""
+			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
+			;;
+	esac
+
 	if ! [ "$banner" = "" ]; then 
 		echo "| "$banner 2>/dev/null
 	fi
