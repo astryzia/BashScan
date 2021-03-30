@@ -28,20 +28,6 @@ valid_ip(){
     return $stat
 }
 
-valid_octet(){
-    octet=$1 
-    if [[ -n "$(grep -i - <<< $octet)" ]]; then
-        IFS='-' read start_octet end_octet <<< $octet
-        if (( 0 < $start_octet < 255 )) && (( 1 < $end_octet <= 255 )) && (( $start_octet <= $end_octet )); then
-            printf "$(seq $start_octet $end_octet)"
-        else
-            if [[ -z "$i_file" ]]; then usage; fi
-        fi
-    else
-        printf "$octet"
-    fi
-}
-
 # Validate timing flag is in range
 valid_timing(){
 	if ! [ "$1" -eq "$1" ] 2>/dev/null; then
