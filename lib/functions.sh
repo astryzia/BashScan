@@ -57,7 +57,7 @@ cidr2network(){
 # Input: hostname
 # Output: IP
 resolve_host(){
-	local ip 
+	local ip=""
 	local host=$1
 	if test $(which dig); then
 		ip=$(dig +search +short $host)
@@ -137,7 +137,7 @@ else
 	# Is this a valid hostname?
 	check_hostname=$(resolve_host $TARGET)
 	if valid_ip $check_hostname; then
-		TARGET="$check_hostname"
+		valid_targets+="$check_hostname"
 	elif valid_ip $TARGET; then
 		valid_targets+=("$TARGET")
 	# If all checks above fail, treat as invalid input
@@ -185,6 +185,10 @@ banners(){
 		"https" | "https-alt" )
 			conn="'GET / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
 			banner=$(timeout 0.5s bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | grep -i "server:")
+			;;
+		"smtps" | "submission" )
+			conn=""
+			banner=$(timeout 0.5s bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null")
 			;;
 		*)
 			conn=""
