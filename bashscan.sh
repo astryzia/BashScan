@@ -302,8 +302,9 @@ banners(){
 	host="$1"
 	port="$2"
 
+	limit="0.5s"
 	service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
-
+    
 	# Eventually, this case statement may scale to a 
 	# point where a different approach is more readable; 
 	# For now, this should work as a poc. 
@@ -322,15 +323,18 @@ banners(){
 		# to the output if that is desired.
 		"https" | "https-alt" )
 			conn="'GET / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
-			banner=$(timeout 0.5s bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | grep -i "server:")
+			banner=$(timeout $limit bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | grep -i "server:")
 			;;
-		"smtps" | "submission" )
+		"smtps" | "submission" | "pop3s" )
 			conn=""
-			banner=$(timeout 0.5s bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null")
+			banner=$(timeout $limit bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | head -n 1)
 			;;
+		"domain" )
+			banner=$(dig version.bind CHAOS TXT @$host 2>/dev/null | grep ^version.bind | cut -d$'\t' -f6)
+		;;
 		*)
 			conn=""
-			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
+			banner=$(timeout $limit bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
 			;;
 	esac
 
