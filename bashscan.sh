@@ -313,22 +313,25 @@ banners(){
 		# a formatted request in order to get a server
 		# banner in response; 
 		"http" | "http-proxy" |  "http-alt" )
-			conn="'GET / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
-			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -i "server:")
+			conn="'HEAD / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
+			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -i "server:" | cut -d" " -f2-)
 			;;
-		# The target may not have OpenSSL library available,
+		# Our script host may not have OpenSSL library available,
 		# but handling a TLS connection in pure BASH is a 
 		# rather steep hill to climb for now;
 		# We can also grab the server cert here and add it 
 		# to the output if that is desired.
 		"https" | "https-alt" )
-			conn="'GET / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
-			banner=$(timeout $limit bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | grep -i "server:")
+			conn="'HEAD / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
+			banner=$(timeout $limit bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | grep -i "server:" | cut -d" " -f2-)
 			;;
 		"smtps" | "submission" | "pop3s" )
 			conn=""
 			banner=$(timeout $limit bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | head -n 1)
 			;;
+		# DNS servers don't have banners per se, but we can
+		# attempt to fingerprint. This is very basic, but can
+		# get more complex if we go into more fingerprinting
 		"domain" )
 			banner=$(dig version.bind CHAOS TXT @$host 2>/dev/null | grep ^version.bind | cut -d$'\t' -f6)
 		;;
