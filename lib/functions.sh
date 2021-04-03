@@ -57,7 +57,7 @@ cidr2network(){
 # Input: hostname
 # Output: IP
 resolve_host(){
-	local ip 
+	local ip=""
 	local host=$1
 	if test $(which dig); then
 		ip=$(dig +search +short $host)
@@ -137,7 +137,7 @@ else
 	# Is this a valid hostname?
 	check_hostname=$(resolve_host $TARGET)
 	if valid_ip $check_hostname; then
-		TARGET="$check_hostname"
+		valid_targets+="$check_hostname"
 	elif valid_ip $TARGET; then
 		valid_targets+=("$TARGET")
 	# If all checks above fail, treat as invalid input
@@ -164,8 +164,9 @@ banners(){
 	host="$1"
 	port="$2"
 
+	limit="0.5s"
 	service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
-
+    
 	# Eventually, this case statement may scale to a 
 	# point where a different approach is more readable; 
 	# For now, this should work as a poc. 
@@ -173,13 +174,32 @@ banners(){
 		# For http services, we usually need to echo in
 		# a formatted request in order to get a server
 		# banner in response; 
-		"http" | "https" | "http-proxy" |  "http-alt" | "https-alt" )
-			conn="'GET / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
-			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -iav "mismatch" | grep -i "server:")
+		"http" | "http-proxy" |  "http-alt" )
+			conn="'HEAD / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
+			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -i "server:" | cut -d" " -f2-)
 			;;
+		# Our script host may not have OpenSSL library available,
+		# but handling a TLS connection in pure BASH is a 
+		# rather steep hill to climb for now;
+		# We can also grab the server cert here and add it 
+		# to the output if that is desired.
+		"https" | "https-alt" )
+			conn="'HEAD / HTTP/1.1\r\nhost: ' $host '\r\n\r\n'"
+			banner=$(timeout $limit bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | grep -i "server:" | cut -d" " -f2-)
+			;;
+		"smtps" | "submission" | "pop3s" )
+			conn=""
+			banner=$(timeout $limit bash -c "echo -ne $conn | openssl s_client -quiet -connect $host:$port 2>/dev/null" | head -n 1)
+			;;
+		# DNS servers don't have banners per se, but we can
+		# attempt to fingerprint. This is very basic, but can
+		# get more complex if we go into more fingerprinting
+		"domain" )
+			banner=$(dig version.bind CHAOS TXT @$host 2>/dev/null | grep ^version.bind | cut -d$'\t' -f6)
+		;;
 		*)
 			conn=""
-			banner=$(timeout 0.5s bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
+			banner=$(timeout $limit bash -c "exec 3<>/dev/tcp/$host/$port; echo -e $conn>&3; cat<&3" | grep -iav "mismatch" | cut -d$'\n' -f1 | tr "\\r" " ")
 			;;
 	esac
 
