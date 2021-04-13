@@ -1,15 +1,45 @@
 #!/bin/bash
 
+########################################
+# color/stylization 
+########################################
+
+reset="\e[0m"
+
+# colors
+cyan="\e[96m"
+magenta="\e[95m"
+red="\e[91m"
+green="\e[92m"
+blue="\e[94m"
+
+# styles
+bold="\e[1m"
+dim="\e[2m"
+inverted="\e[7m"
+underline="\e[4m"
+blink="\e[5m"
+
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
 START_SCRIPT=$(date +%s%3N)
 start_stdout=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
 
 readonly PROGNAME='BashScan'
-readonly VERSION='0.0.6'
+readonly VERSION='version 0.1'
 readonly URL='https://github.com/astryzia/BashScan'
 
-printf "Starting %s %s ( %s ) at %s\n" "$PROGNAME" "$VERSION" "$URL" "$start_stdout"
+readonly SPLASH="
+██████   █████  ███████ ██   ██ ███████  ██████  █████  ███    ██ 
+██   ██ ██   ██ ██      ██   ██ ██      ██      ██   ██ ████   ██ 
+██████  ███████ ███████ ███████ ███████ ██      ███████ ██ ██  ██ 
+██   ██ ██   ██      ██ ██   ██      ██ ██      ██   ██ ██  ██ ██ 
+██████  ██   ██ ███████ ██   ██ ███████  ██████ ██   ██ ██   ████ 
+"
+
+printf $cyan"\n\t\t\t\t\t\t      "$dim"%s"$reset$magenta"%s\t\t\t     "$dim$cyan"%s\n"$reset "$VERSION" "$SPLASH" "$URL"
+printf $inverted"\n    %s    \n"$reset "$start_stdout"
+#printf $cyan$bold"\nStarting %s %s (%s) at %s\n"$reset "$PROGNAME" "$VERSION" "$URL" "$start_stdout"
 
 ########################################
 # help/usage 
@@ -424,28 +454,28 @@ grepable_output(){
 }
 
 normal_output(){
-	printf "Scan report for %s (%s):\n" $name $host
+	printf $inverted"Scan report for %s (%s):\n"$reset $name $host
 
 	# If we have a latency value, host is up
 	if [[ -n "$latency" ]]; then
-		printf "Host is up (%ss latency)\n" $latency
+		printf $green"Host is up (%ss latency)\n"$reset $latency
 	# Only report down if we haven't disabled ping
 	elif [[ "$DO_PING" = true ]]; then
-		printf "Host seems down\n"
+		printf $red"Host seems down\n"$reset
 	fi
 
 	closed_ports=$(($num_ports-$count_liveports))
 	if [ "$closed_ports" -lt "$num_ports" ]; then
 		if [ "$closed_ports" -gt 0 ]; then
-			printf "Not shown: %s closed %s\n" $closed_ports $(plural $closed_ports port)
+			printf $bold"Not shown:"$reset" %s closed %s\n" $closed_ports $(plural $closed_ports port)
 		fi
-		printf "PORT\tSTATE\tSERVICE\n"
+		printf $bold$underline$blue"PORT"$reset"\t"$bold$underline$blue"STATE"$reset"\t"$bold$underline$blue"SERVICE"$reset"\n"
 		IFS=$'\n'
 		sorted=($(sort -V <<< "${LIVEPORTS[*]}"))
 		unset IFS
 		for port in ${sorted[@]}; do
 			service=$(cat lib/nmap-services | grep -w "${port}/tcp" | cut -d" " -f1)
-			printf "%s\topen\t%s" $port $service
+			printf "%s\t"$green"open"$reset"\t%s" $port $service
 			if [ "$BANNER" = true ]; then
 				printf " %s" "${BANNERS[$port]}"
 			fi
@@ -455,8 +485,8 @@ normal_output(){
 		if [ "$num_ports" -gt 1 ]; then
 			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $(plural $num_ports port) $name $host
 		else
-			printf "PORT\tSTATE\tSERVICE\n"
-			printf "%s\tclosed\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
+			$bold$underline$blue"PORT"$reset"\t"$bold$underline$blue"STATE"$reset"\t"$bold$underline$blue"SERVICE"$reset"\n"
+			printf "%s\t"$red"closed"$reset"\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
 		fi
 	fi
 	
@@ -554,13 +584,13 @@ ParallelExec() {
 ########################################
 
 main(){
-	printf "\nLocal IP:\t\t%s\n" $localip
-	printf "Netmask:\t\t%s\n" $iprange
-	printf "External IP:\t\t%s\n" $getip
-	printf "Default Interface:\t%s\n" $default_interface
+	printf $blue$bold"\nLocal IP:"$reset"\t\t"$green"%s"$reset"\n" $localip
+	printf $blue$bold"Netmask:"$reset"\t\t"$green"%s"$reset"\n" $iprange
+	printf $blue$bold"External IP:"$reset"\t\t"$green"%s"$reset"\n" $getip
+	printf $blue$bold"Default Interface:"$reset"\t"$green"%s"$reset"\n" $default_interface
 
 	if [ -n "$TARGET" ]; then
-		printf "Target:\t\t\t%s\n" "$TARGET"
+		printf $blue$bold"Target:"$reset"\t\t\t"$green"%s"$reset"\n" "$TARGET"
 	fi
 
 	# If user hasn't supplied any targets, handle default
@@ -576,16 +606,16 @@ main(){
 
 	if [[ "$DO_PING" = true ]]; then
 		if [ "$arp_warning" = true ]; then
-			printf "\n[-] ARP ping disabled as root may be required, [ -h | --help ] for more information"
+			printf $red$bold"\n[-]"$reset$bold" ARP ping disabled as root may be required, [ -h | --help ] for more information"$reset
 		fi
-		printf "\n[+] Sweeping %s %s for live hosts (%s%s%s)\n" $num_targets $(plural $num_targets "target") $SWEEP_METHOD
+		printf $green$bold"\n[+]"$reset" Sweeping %s %s for live hosts (%s%s%s)\n" $num_targets $(plural $num_targets "target") $SWEEP_METHOD
 
 		LIVEHOSTS=($(pingsweep | sort -V | uniq))
 	else
 		# In this case, we aren't pinging to populate a list
 		# of "live" hosts... just copy the TARGETS array to
 		# LIVEHOSTS and start port scanning that.
-		printf "\n[-] Host discovery disabled\n"
+		printf $red$bold"\n[-]"$reset$bold" Host discovery disabled\n"
 		#printf "[*] Warning: This can potentially be very slow over large ranges of targets/ports\n"
 		#printf "[*] Note: Output for hosts with no open ports can be disabled with [ -o | --open ]\n"
 		LIVEHOSTS+=("${TARGETS[@]}")
@@ -594,14 +624,14 @@ main(){
 	num_hosts=${#LIVEHOSTS[@]}
 
 	if [ "$num_hosts" -eq 0 ]; then
-		printf "[+] No responsive hosts found\n\n"
+		printf $red$bold"[-]"$reset$bold" No responsive hosts found\n\n"
 	else
 		# Adjust stdout verbiage depending on whether host
 		# discovery is enabled or disabled
 		if [[ "$DO_PING" = true ]]; then
-			printf "[+] $num_hosts %s found\n" $(plural $num_hosts host) 
+			printf $green$bold"[+]"$reset" $num_hosts %s found\n" $(plural $num_hosts host) 
 		fi
-			printf "[+] Beginning scan of %s %s on %s %s\n\n" $num_ports $(plural $num_ports "port") $num_hosts $(plural $num_hosts "target")
+			printf $green$bold"[+]"$reset" Beginning scan of %s %s on %s %s\n\n" $num_ports $(plural $num_ports "port") $num_hosts $(plural $num_hosts "target")
 			portscan | sort -V | uniq
 		
 	fi
@@ -656,7 +686,7 @@ main(){
 	runtime_stdout=$(TZ=$TZ date -d @"$runtime" +%H:%M:%S.%3N)
 	end_file=$(date -d @"$(( $END_SCAN / 1000 ))" +%c)
 
-	printf "%s done: %s %s scanned in %s\n" $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
+	printf $dim"%s done: %s %s scanned in %s\n"$reset $PROGNAME $num_hosts $(plural $num_hosts host) $runtime_stdout
 	
 	# File footer
 	if [[ -n "$n_file" ]]; then

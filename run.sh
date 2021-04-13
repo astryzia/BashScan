@@ -1,15 +1,45 @@
 #!/bin/bash
 
+########################################
+# color/stylization 
+########################################
+
+reset="\e[0m"
+
+# colors
+cyan="\e[96m"
+magenta="\e[95m"
+red="\e[91m"
+green="\e[92m"
+blue="\e[94m"
+
+# styles
+bold="\e[1m"
+dim="\e[2m"
+inverted="\e[7m"
+underline="\e[4m"
+blink="\e[5m"
+
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
 START_SCRIPT=$(date +%s%3N)
 start_stdout=$(date --date @"$(( $START_SCRIPT / 1000 ))" "+%Y-%m-%d %H:%M:%S %Z")
 
 readonly PROGNAME='BashScan'
-readonly VERSION='0.0.6'
+readonly VERSION='version 0.1'
 readonly URL='https://github.com/astryzia/BashScan'
 
-printf "Starting %s %s ( %s ) at %s\n" "$PROGNAME" "$VERSION" "$URL" "$start_stdout"
+readonly SPLASH="
+██████   █████  ███████ ██   ██ ███████  ██████  █████  ███    ██ 
+██   ██ ██   ██ ██      ██   ██ ██      ██      ██   ██ ████   ██ 
+██████  ███████ ███████ ███████ ███████ ██      ███████ ██ ██  ██ 
+██   ██ ██   ██      ██ ██   ██      ██ ██      ██   ██ ██  ██ ██ 
+██████  ██   ██ ███████ ██   ██ ███████  ██████ ██   ██ ██   ████ 
+"
+
+printf $cyan"\n\t\t\t\t\t\t      "$dim"%s"$reset$magenta"%s\t\t\t     "$dim$cyan"%s\n"$reset "$VERSION" "$SPLASH" "$URL"
+printf $inverted"\n    %s    \n"$reset "$start_stdout"
+#printf $cyan$bold"\nStarting %s %s (%s) at %s\n"$reset "$PROGNAME" "$VERSION" "$URL" "$start_stdout"
 
 ########################################
 # help/usage 
