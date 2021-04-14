@@ -576,7 +576,7 @@ ParallelExec() {
         for pid in "${pidsArray[@]}"; do
             # Handle uninterruptible sleep state or zombies by ommiting them from running process array (How to kill that is already dead ? :)
             if kill -0 $pid > /dev/null 2>&1; then
-                pidState=$(ps -p$pid -o state= 2 > /dev/null)
+                pidState=$(ps -p$pid -o state= 2>/dev/null)
                 if [ "$pidState" != "D" ] && [ "$pidState" != "Z" ]; then
                     newPidsArray+=($pid)
                 fi
