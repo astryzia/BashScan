@@ -20,6 +20,19 @@ inverted="\e[7m"
 underline="\e[4m"
 blink="\e[5m"
 
+########################################
+# dependencies
+########################################
+
+if test ! $(which bc); then
+	echo $grn "* Installing bc" $white
+	sudo apt -y -qq install bc > /dev/null 2>&1;
+fi
+
+########################################
+# init
+########################################
+
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
 START_SCRIPT=$(date +%s%3N)
