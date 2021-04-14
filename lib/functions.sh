@@ -317,7 +317,7 @@ normal_output(){
 		if [ "$num_ports" -gt 1 ]; then
 			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $(plural $num_ports port) $name $host
 		else
-			$bold$underline$blue"PORT"$reset"\t"$bold$underline$blue"STATE"$reset"\t"$bold$underline$blue"SERVICE"$reset"\n"
+			printf $bold$underline$blue"PORT"$reset"\t"$bold$underline$blue"STATE"$reset"\t"$bold$underline$blue"SERVICE"$reset"\n"
 			printf "%s\t"$red"closed"$reset"\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
 		fi
 	fi
