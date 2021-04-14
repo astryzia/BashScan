@@ -20,6 +20,24 @@ inverted="\e[7m"
 underline="\e[4m"
 blink="\e[5m"
 
+########################################
+# dependencies
+########################################
+
+if test ! $(which bc); then
+	echo $grn "* Installing bc" $white
+	sudo apt -y -qq install bc > /dev/null 2>&1;
+fi
+
+if test ! $(which arping); then
+        echo $grn "* Installing arping" $white
+        sudo apt -y -qq install arping > /dev/null 2>&1;
+fi
+
+########################################
+# init
+########################################
+
 # Capture script invocation for use in file output
 invoked="$(printf %q "$BASH_SOURCE")$((($#)) && printf ' %q' "$@")"
 START_SCRIPT=$(date +%s%3N)
@@ -485,7 +503,7 @@ normal_output(){
 		if [ "$num_ports" -gt 1 ]; then
 			printf "All %s scanned %s on %s (%s) are closed\n" $num_ports $(plural $num_ports port) $name $host
 		else
-			$bold$underline$blue"PORT"$reset"\t"$bold$underline$blue"STATE"$reset"\t"$bold$underline$blue"SERVICE"$reset"\n"
+			printf $bold$underline$blue"PORT"$reset"\t"$bold$underline$blue"STATE"$reset"\t"$bold$underline$blue"SERVICE"$reset"\n"
 			printf "%s\t"$red"closed"$reset"\t%s\n" ${ports[@]} $(cat lib/nmap-services | grep -w "${ports[@]}/tcp" | cut -d" " -f1)
 		fi
 	fi

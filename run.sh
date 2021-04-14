@@ -25,8 +25,13 @@ blink="\e[5m"
 ########################################
 
 if test ! $(which bc); then
-	echo $grn "* Installing dependencies" $white
-	sudo apt -y -qq install bc arping > /dev/null 2>&1;
+	echo $grn "* Installing bc" $white
+	sudo apt -y -qq install bc > /dev/null 2>&1;
+fi
+
+if test ! $(which arping); then
+        echo $grn "* Installing arping" $white
+        sudo apt -y -qq install arping > /dev/null 2>&1;
 fi
 
 ########################################
