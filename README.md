@@ -9,8 +9,6 @@
 
 # BashScan
 
-[![asciicast](https://asciinema.org/a/CPYSJDxyNghEw3bN68Vtnb8NO.svg)](https://asciinema.org/a/CPYSJDxyNghEw3bN68Vtnb8NO)
-
 BashScan is a port scanner built to utilize /dev/tcp for network and service discovery on systems that have limitations or are otherwise unable to use alternative scanning solutions such as nmap.
 
 # Installation
