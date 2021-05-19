@@ -62,6 +62,7 @@ Alternatively, using the monolithic script
 `-v | --version` Print version
 
 **Dockerized example**
+
 To build the dockerized image run `make build` or `make all` to build and run the BashScan image. Examples to interact with the container:
 
 `./docker_bashscan.sh -r -p 22,80,443,3306,3389 -b`
