@@ -4,7 +4,6 @@
 FROM alpine/git as clone
 WORKDIR /app
 RUN git clone https://github.com/astryzia/BashScan.git
-RUN ls -la
 
 ######
 ## Stage 2: Make final small image
